@@ -53,7 +53,10 @@ function snapshot(o: Options): RuntimeSnapshot {
       id: o.character.id,
       name: o.character.name,
       description: o.character.description,
-      lorebook: o.character.lorebook,
+      // Worldbook entries stay in the trusted host and are fetched through
+      // getWorldbook. Sending the complete card lorebook into every sandboxed
+      // iframe was the largest source of startup stalls and RPC starvation.
+      lorebook: o.character.lorebook ? { name: o.character.lorebook.name } : undefined,
     },
     variables,
     regexes: o.character.extensions?.regex_scripts ?? [],
@@ -130,8 +133,17 @@ export function useCardRuntime(options: Options) {
     const persistMessages = async (messages: ChatSession['messages']) => {
       const next = o.sessions.map((s) => (s.id === o.session.id ? { ...s, messages } : s));
       latest.current = { ...o, sessions: next, session: { ...o.session, messages } };
-      bridge.update(snapshot(latest.current));
-      await o.persist(next, o.session.id);
+      const nextSnapshot = snapshot(latest.current);
+      // Message edits are common in helper scripts. Send only the changed
+      // message list and variable tables; cloning the character lorebook into
+      // every iframe here made large cards visibly stutter and could starve
+      // the RPC response queue.
+      bridge.updateMessages(nextSnapshot.messages, nextSnapshot.variables);
+      // Resolve helper RPCs immediately; the app's serialized writer handles
+      // the disk write in the background.
+      void Promise.resolve(o.persist(next, o.session.id)).catch((error: unknown) =>
+        latest.current.notice(`消息已更新到当前会话，但保存失败：${String(error)}`),
+      );
     };
     const updateCharacter = async (patch: Partial<CharacterCardData>) => {
       latest.current = { ...latest.current, character: { ...latest.current.character, ...patch } };
@@ -177,7 +189,9 @@ export function useCardRuntime(options: Options) {
           const session = { ...current.session, runtimeVariables: vars };
           const sessions = current.sessions.map((s) => (s.id === session.id ? session : s));
           latest.current = { ...current, session, sessions };
-          await o.persist(sessions, session.id);
+          void Promise.resolve(o.persist(sessions, session.id)).catch((error: unknown) =>
+            latest.current.notice(`变量已更新到当前会话，但保存失败：${String(error)}`),
+          );
         }
         return true;
       }
