@@ -1,5 +1,6 @@
 import { orderPrompts, withPromptOrder } from './promptCompiler.ts';
 import type { Node, Edge } from '@xyflow/react';
+import { canvasState, restoreCanvas, orderedRegexNodes } from './canvasState.ts';
 
 export interface SillyPromptItem {
   identifier?: string;
@@ -45,6 +46,8 @@ export interface SillyPresetJson {
  * 兼容流派 4: prompts 里的 regexes-bindings
  */
 export function extractRegexRulesFromPreset(preset: SillyPresetJson): any[] {
+  if (preset.extensions?.comfysilly_regex_authoritative === true)
+    return Array.isArray(preset.extensions.regex_scripts) ? preset.extensions.regex_scripts : [];
   let rules: any[] = [];
 
   // 1. 扫描 extensions.regex_scripts (图灵预设等使用此标准)
@@ -148,7 +151,7 @@ export function convertSillyPresetToGraph(
       },
     });
 
-    if (idx > 0 && idx % itemsPerCol !== 0) {
+    if (idx > 0) {
       const prevId = `prompt-${enabledPrompts[idx - 1].identifier || idx - 1}`;
       edges.push({
         id: `flow-step-${idx}`,
@@ -247,19 +250,39 @@ export function convertSillyPresetToGraph(
     style: { stroke: '#14b8a6', strokeWidth: 2.5 },
   });
 
-  return { nodes, edges };
+  const saved = preset.extensions?.comfysilly_canvas;
+  const restored = restoreCanvas(nodes, edges, saved, callbacks);
+  const promptOrder = enabledPrompts.map((p) => p.identifier);
+  if (saved?.version === 1 && JSON.stringify(saved.promptOrder) !== JSON.stringify(promptOrder)) {
+    const ids = new Set(restored.nodes.map((n) => n.id));
+    restored.edges = [
+      ...restored.edges.filter(
+        (e) => !(e.source.startsWith('prompt-') && e.target.startsWith('prompt-')),
+      ),
+      ...edges.filter(
+        (e) =>
+          e.source.startsWith('prompt-') &&
+          e.target.startsWith('prompt-') &&
+          ids.has(e.source) &&
+          ids.has(e.target),
+      ),
+    ];
+  }
+  return restored;
 }
 
 export function exportGraphToSillyPreset(
   allSourcePrompts: SillyPromptItem[],
   canvasNodes: Node[],
   basePreset?: SillyPresetJson,
+  canvasEdges?: Edge[],
 ): SillyPresetJson {
   const llmNode = canvasNodes.find((n) => n.type === 'llmInference');
   const llmData = (llmNode?.data || {}) as any;
 
-  const regexNode = canvasNodes.find((n) => n.type === 'regexFilter');
-  const regexList = (regexNode?.data as any)?.regexList || [];
+  const regexList = orderedRegexNodes(canvasNodes, canvasEdges ?? []).flatMap((n) =>
+    Array.isArray(n.data.regexList) ? n.data.regexList : [],
+  );
 
   const nodeMap = new Map<string, any>();
   canvasNodes.forEach((n) => {
@@ -287,11 +310,13 @@ export function exportGraphToSillyPreset(
 
   // 如果原本是 extensions.regex_scripts 则存回 regex_scripts
   const extensions = { ...(basePreset?.extensions || {}) };
-  if (extensions.regex_scripts) {
-    extensions.regex_scripts = regexList;
-  } else {
-    extensions.regex = regexList;
-  }
+  if (canvasEdges)
+    extensions.comfysilly_canvas = {
+      ...canvasState(canvasNodes, canvasEdges),
+      promptOrder: prompts.filter((p) => p.enabled !== false).map((p) => p.identifier),
+    };
+  extensions.regex_scripts = regexList;
+  extensions.comfysilly_regex_authoritative = true;
 
   return withPromptOrder(
     {

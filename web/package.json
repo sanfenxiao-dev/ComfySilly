@@ -1,7 +1,7 @@
 {
   "name": "web",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.4.3",
   "type": "module",
   "scripts": {
     "dev": "node scripts/build-runtime.mjs && vite",
@@ -12,6 +12,8 @@
     "test:ui": "node tests/chat-ui.smoke.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
     "test:studio": "node tests/studio.smoke.mjs",
+    "test:canvas": "node tests/canvas.smoke.mjs",
+    "test:regex": "node tests/regex-ui.smoke.mjs",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
     "test:history": "node tests/history.smoke.mjs",

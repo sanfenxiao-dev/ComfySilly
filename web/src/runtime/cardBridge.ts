@@ -24,6 +24,16 @@ interface Frame {
 }
 export class CardBridge {
   private frames = new Map<string, Frame>();
+  private globals = new Map<string, { owner: string; descriptor: any }>();
+  private globalCalls = new Map<
+    string,
+    {
+      owner: string;
+      resolve: (v: any) => void;
+      reject: (e: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private acknowledgements = new Map<
     string,
     { remaining: Set<string>; resolve: () => void; timer: ReturnType<typeof setTimeout> }
@@ -44,6 +54,12 @@ export class CardBridge {
   destroy() {
     window.removeEventListener('message', this.receive);
     this.frames.clear();
+    this.globals.clear();
+    for (const call of this.globalCalls.values()) {
+      clearTimeout(call.timer);
+      call.reject(new Error('卡片已关闭'));
+    }
+    this.globalCalls.clear();
     for (const a of this.acknowledgements.values()) {
       clearTimeout(a.timer);
       a.resolve();
@@ -54,6 +70,13 @@ export class CardBridge {
     this.frames.set(id, frame);
     return () => {
       this.frames.delete(id);
+      for (const [name, global] of this.globals) if (global.owner === id) this.globals.delete(name);
+      for (const [callId, call] of this.globalCalls)
+        if (call.owner === id) {
+          clearTimeout(call.timer);
+          call.reject(new Error('共享接口所在页面已关闭'));
+          this.globalCalls.delete(callId);
+        }
       for (const [eventId, a] of this.acknowledgements) {
         a.remaining.delete(id);
         if (!a.remaining.size) {
@@ -76,7 +99,11 @@ export class CardBridge {
     this.snapshot.messages = messages;
     if (variables) this.snapshot.variables = variables;
     for (const frame of this.frames.values())
-      this.send(frame, { type: 'messages', messages, variables: variables ?? this.snapshot.variables });
+      this.send(frame, {
+        type: 'messages',
+        messages,
+        variables: variables ?? this.snapshot.variables,
+      });
   }
   private send(frame: Frame, data: Record<string, unknown>) {
     frame.window.postMessage({ channel: 'comfysilly-card-v1', token: frame.token, ...data }, '*');
@@ -108,8 +135,33 @@ export class CardBridge {
     );
     if (!entry) return;
     const [frameId, frame] = entry;
+    if (
+      data.type === 'publishGlobal' &&
+      typeof data.name === 'string' &&
+      /^[A-Za-z_$][\w$]{0,99}$/.test(data.name) &&
+      !['constructor', 'prototype', '__proto__'].includes(data.name)
+    ) {
+      this.globals.set(data.name, { owner: frameId, descriptor: data.descriptor });
+      for (const other of this.frames.values())
+        if (other !== frame)
+          this.send(other, { type: 'sharedGlobal', name: data.name, descriptor: data.descriptor });
+    }
+    if (data.type === 'globalResult') {
+      const call = this.globalCalls.get(data.id);
+      if (call?.owner === frameId) {
+        clearTimeout(call.timer);
+        this.globalCalls.delete(data.id);
+        if (data.error) call.reject(new Error(String(data.error)));
+        else call.resolve(data.value);
+      }
+    }
     if (data.type === 'interaction') this.onInteraction();
-    if (data.type === 'ready') this.send(frame, { type: 'snapshot', snapshot: this.getSnapshot() });
+    if (data.type === 'ready') {
+      this.send(frame, { type: 'snapshot', snapshot: this.getSnapshot() });
+      for (const [name, global] of this.globals)
+        if (global.owner !== frameId)
+          this.send(frame, { type: 'sharedGlobal', name, descriptor: global.descriptor });
+    }
     if (data.type === 'resize' && Number.isFinite(data.height))
       frame.onResize(Math.min(1600, Math.max(120, data.height)));
     if (data.type === 'error') frame.onError(String(data.message).slice(0, 3000));
@@ -133,16 +185,45 @@ export class CardBridge {
         return;
       }
       const work =
-        data.method === 'eventEmit'
-          ? this.emit(String(data.args[0]), data.args[1])
-          : data.method === 'networkRequest'
-            ? invoke('card_network_request', { requestJson: JSON.stringify(data.args[0] ?? {}) })
-          : this.onCall(String(data.method), data.args);
+        data.method === 'callGlobal'
+          ? this.callGlobal(data.args[0], data.args[1], data.args[2])
+          : data.method === 'eventEmit'
+            ? this.emit(String(data.args[0]), data.args[1])
+            : data.method === 'networkRequest'
+              ? invoke('card_network_request', { requestJson: JSON.stringify(data.args[0] ?? {}) })
+              : this.onCall(String(data.method), data.args);
       Promise.resolve(work)
         .then((value) => this.send(frame, { type: 'result', id: data.id, value }))
         .catch((error) => this.send(frame, { type: 'result', id: data.id, error: String(error) }));
     }
   };
+  private callGlobal(name: string, path: string[], args: unknown[]): Promise<unknown> {
+    const global = this.globals.get(name),
+      frame = global && this.frames.get(global.owner);
+    if (!global || !frame) return Promise.reject(new Error('共享接口未初始化'));
+    let descriptor = global.descriptor;
+    if (
+      !Array.isArray(path) ||
+      path.length > 5 ||
+      !path.every(
+        (key) =>
+          typeof key === 'string' && !['constructor', 'prototype', '__proto__'].includes(key),
+      )
+    )
+      return Promise.reject(new Error('共享接口路径无效'));
+    for (const key of path) descriptor = descriptor?.entries?.[key];
+    if (descriptor?.kind !== 'function' || !Array.isArray(args) || args.length > 20)
+      return Promise.reject(new Error('未公开的共享接口或参数无效'));
+    return new Promise((resolve, reject) => {
+      const id = crypto.randomUUID();
+      const timer = setTimeout(() => {
+        this.globalCalls.delete(id);
+        reject(new Error('共享接口调用超时'));
+      }, 180000);
+      this.globalCalls.set(id, { owner: global.owner, resolve, reject, timer });
+      this.send(frame, { type: 'invokeGlobal', name, path, args, id });
+    });
+  }
 }
 const scriptJson = (v: unknown) =>
   JSON.stringify(v)

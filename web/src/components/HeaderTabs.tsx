@@ -21,6 +21,7 @@ interface Props {
   currentTab: TabType;
   onTabChange: (tab: TabType) => void;
   onImportPreset: () => void;
+  onImportRegex: () => void;
   onSaveCurrentPreset: () => void;
   onNewPreset: () => void;
   onDeletePreset: (name: string, path: string) => void;
@@ -158,6 +159,9 @@ export function HeaderTabs(p: Props) {
             <button className="button button-quiet" onClick={p.onSaveCurrentPreset}>
               <Save size={14} />
               保存
+            </button>
+            <button className="button button-quiet" onClick={p.onImportRegex}>
+              <Upload size={14} />导入正则
             </button>
             <div className="toolbar-spacer" />
             <button className="button" onClick={p.onRunWorkflow}>

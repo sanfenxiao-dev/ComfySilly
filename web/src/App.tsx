@@ -3,6 +3,9 @@ import type { Preferences } from './types/settings';
 import type { SettingsSection } from './components/SettingsModal';
 import { CharacterWrites } from './utils/characterWrites';
 import { validateWorkflow } from './utils/workflowValidation';
+import { connectPromptOrder, appendRegexRules, orderedRegexNodes } from './utils/canvasState';
+import { RegexImportDialog, RegexNodeActions } from './components/RegexImportDialog';
+import { ConfirmDialog } from './components/Dialog';
 import { compilePrompt } from './utils/promptCompiler';
 import { orderPrompts, withPromptOrder } from './utils/promptCompiler';
 import { useState, useCallback, useMemo, useRef, useEffect, lazy, Suspense } from 'react';
@@ -84,7 +87,12 @@ function FlowWorkspace() {
   }, [statusMessage]);
   const [currentPresetName, setCurrentPresetName] = useState<string>('默认预设');
   const [presetList, setPresetList] = useState<PresetItemMeta[]>([]);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    nodeId?: string;
+    edgeId?: string;
+  } | null>(null);
 
   // 全局设置 Modal 状态
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('models');
@@ -123,10 +131,67 @@ function FlowWorkspace() {
 
   const basePresetRef = useRef<SillyPresetJson | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const activePreset = useMemo(
-    () => exportGraphToSillyPreset(allPromptsList, nodes, basePresetRef.current ?? undefined),
-    [allPromptsList, nodes],
+  const [regexImportTarget, setRegexImportTarget] = useState<string | null>(null);
+  const [pendingCanvasDelete, setPendingCanvasDelete] = useState<{
+    nodes: Node[];
+    edges: Edge[];
+  } | null>(null);
+  const [canvasUndo, setCanvasUndo] = useState<{
+    nodes: Node[];
+    edges: Edge[];
+    prompts: SillyPromptItem[];
+  } | null>(null);
+  const graphRef = useRef({ nodes, edges });
+  graphRef.current = { nodes, edges };
+  // Selection, measurement and pointer movement are not prompt edits. Keep a
+  // semantic snapshot stable so dragging hundreds of nodes never serializes
+  // the complete preset or invalidates chat regex/compilation caches.
+  const semanticRef = useRef({ nodes, edges });
+  if (
+    nodes.length !== semanticRef.current.nodes.length ||
+    nodes.some((n, i) => {
+      const old = semanticRef.current.nodes[i];
+      return n.id !== old.id || n.type !== old.type || n.data !== old.data;
+    })
+  )
+    semanticRef.current.nodes = nodes;
+  if (
+    edges.length !== semanticRef.current.edges.length ||
+    edges.some((e, i) => {
+      const old = semanticRef.current.edges[i];
+      return (
+        e.id !== old.id ||
+        e.source !== old.source ||
+        e.target !== old.target ||
+        e.sourceHandle !== old.sourceHandle ||
+        e.targetHandle !== old.targetHandle
+      );
+    })
+  )
+    semanticRef.current.edges = edges;
+  const semanticNodes = semanticRef.current.nodes,
+    semanticEdges = semanticRef.current.edges;
+  const regexOrder = useMemo(
+    () => orderedRegexNodes(semanticNodes, semanticEdges).map((n) => n.id),
+    [semanticNodes, semanticEdges],
   );
+  const regexActions = useMemo(
+    () => ({ onImport: setRegexImportTarget, order: regexOrder }),
+    [regexOrder],
+  );
+  const activePreset = useMemo(
+    () =>
+      exportGraphToSillyPreset(
+        allPromptsList,
+        semanticNodes,
+        basePresetRef.current ?? undefined,
+        semanticEdges,
+      ),
+    [allPromptsList, semanticNodes, semanticEdges],
+  );
+  useEffect(() => {
+    basePresetRef.current = activePreset;
+  }, [activePreset]);
   const { setCenter, screenToFlowPosition } = useReactFlow();
 
   const refreshPresetLibrary = useCallback(async () => {
@@ -336,7 +401,15 @@ function FlowWorkspace() {
         });
 
         if (basePresetRef.current) {
-          const updatedPreset = withPromptOrder(basePresetRef.current, updated);
+          const updatedPreset = withPromptOrder(
+            exportGraphToSillyPreset(
+              updated,
+              graphRef.current.nodes,
+              basePresetRef.current,
+              graphRef.current.edges,
+            ),
+            updated,
+          );
           basePresetRef.current = updatedPreset;
           const { nodes: newNodes, edges: newEdges } = convertSillyPresetToGraph(updatedPreset, {
             onToggle: handleNodeToggle,
@@ -392,7 +465,12 @@ function FlowWorkspace() {
         reordered.splice(toIndex, 0, movedItem);
 
         if (basePresetRef.current) {
-          const updatedPreset = withPromptOrder(basePresetRef.current, reordered);
+          const updatedPreset = exportGraphToSillyPreset(
+            reordered,
+            graphRef.current.nodes,
+            basePresetRef.current,
+            graphRef.current.edges,
+          );
           basePresetRef.current = updatedPreset;
           const { nodes: newNodes, edges: newEdges } = convertSillyPresetToGraph(updatedPreset, {
             onToggle: handleNodeToggle,
@@ -442,25 +520,73 @@ function FlowWorkspace() {
     [],
   );
 
-  const onConnect = useCallback(
-    (params: Connection) =>
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...params,
-            animated: true,
-            style: { stroke: '#a78bfa', strokeWidth: 2 },
-          },
-          eds,
-        ),
-      ),
-    [setEdges],
-  );
+  const onConnect = (params: Connection) => {
+    try {
+      if (params.source === params.target) throw new Error('不能连接节点自身');
+      const source = nodes.find((n) => n.id === params.source),
+        target = nodes.find((n) => n.id === params.target);
+      if (source?.type === 'promptBlock' && target?.type === 'promptBlock') {
+        const ordered = connectPromptOrder(allPromptsList, params.source, params.target);
+        setAllPromptsList(ordered);
+        setNodes((old) =>
+          old.map((n) =>
+            n.type === 'promptBlock'
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    calcIndex:
+                      ordered
+                        .filter((p) => p.enabled !== false)
+                        .findIndex((p) => `prompt-${p.identifier}` === n.id) + 1,
+                  },
+                }
+              : n,
+          ),
+        );
+        basePresetRef.current = withPromptOrder(basePresetRef.current ?? {}, ordered);
+        const ids = ordered
+          .map((p, i) => `prompt-${p.identifier || i}`)
+          .filter((id) => nodes.some((n) => n.id === id));
+        setEdges((old) => [
+          ...old.filter((e) => !(e.source.startsWith('prompt-') && e.target.startsWith('prompt-'))),
+          ...ids.slice(1).map((id, i) => ({
+            id: `order-${ids[i]}-${id}`,
+            source: ids[i],
+            target: id,
+            sourceHandle: 'prompt_out',
+            targetHandle: 'prompt_in',
+          })),
+        ]);
+        setStatusMessage('提示词连线已更新实际条目顺序；深度注入仍遵循各条目的设置');
+      } else {
+        const next = addEdge({ ...params, style: { stroke: '#a78bfa', strokeWidth: 2 } }, edges);
+        validateWorkflow(nodes, next);
+        setEdges(next);
+        setStatusMessage(
+          source?.type === 'regexFilter' && target?.type === 'regexFilter'
+            ? '已更新正则实际执行顺序：按节点连线，再按节点内规则顺序执行；请保存预设'
+            : '已添加流程连线；正则节点按连线排序，其余通用 DAG 执行尚未接入',
+        );
+      }
+    } catch (e) {
+      setStatusMessage(`连线失败：${String(e)}`);
+    }
+  };
 
   const loadPresetData = useCallback(
     (presetData: SillyPresetJson, name: string) => {
       try {
+        presetData = {
+          ...presetData,
+          prompts: presetData.prompts?.map((p, i) => ({
+            ...p,
+            identifier: p.identifier || `comfy-prompt-${i}`,
+          })),
+        };
         basePresetRef.current = presetData;
+        setCanvasUndo(null);
+        setPendingCanvasDelete(null);
         setCurrentPresetName(name);
         setAllPromptsList(orderPrompts(presetData));
         localStorage.setItem('comfysilly:last-preset', name);
@@ -471,8 +597,9 @@ function FlowWorkspace() {
         });
         setNodes(newNodes);
         setEdges(newEdges);
-        const regexCount =
-          (newNodes.find((n) => n.type === 'regexFilter')?.data as any)?.regexList?.length || 0;
+        const regexCount = newNodes
+          .filter((n) => n.type === 'regexFilter')
+          .reduce((sum, n) => sum + ((n.data.regexList as any[])?.length ?? 0), 0);
         setStatusMessage(`✨ 成功加载「${name}」！识别并接入 ${regexCount} 条预设正则规则！`);
       } catch (err: any) {
         console.error(err);
@@ -532,6 +659,7 @@ function FlowWorkspace() {
         allPromptsList,
         nodes,
         basePresetRef.current || undefined,
+        edges,
       );
       const content = JSON.stringify(presetJson, null, 2);
 
@@ -542,10 +670,75 @@ function FlowWorkspace() {
 
       setStatusMessage(`💾 预设「${currentPresetName}」已持久化保存！`);
       await refreshPresetLibrary();
-    } catch {
-      setStatusMessage(`💾 预设「${currentPresetName}」已本地保存！`);
+    } catch (error) {
+      setStatusMessage(`❌ 预设「${currentPresetName}」保存失败，修改仍在界面中：${String(error)}`);
     }
-  }, [allPromptsList, nodes, currentPresetName, refreshPresetLibrary]);
+  }, [allPromptsList, nodes, edges, currentPresetName, refreshPresetLibrary]);
+
+  const handleImportRegex = () => {
+    const selected = nodes.filter((n) => n.type === 'regexFilter' && n.selected);
+    setRegexImportTarget(selected.length === 1 ? selected[0].id : (regexOrder[0] ?? '__new__'));
+  };
+  const applyRegexImport = (
+    targetId: string,
+    imported: Record<string, any>[],
+    skipDuplicates: boolean,
+  ) => {
+    const target = nodes.find((n) => n.id === targetId && n.type === 'regexFilter');
+    if (!target && targetId !== '__new__') throw Error('目标节点已不存在，请重新选择');
+    const { rules, skipped } = appendRegexRules(
+      (target?.data.regexList as any[]) ?? [],
+      imported,
+      skipDuplicates,
+    );
+    if (target) handleNodeUpdate(target.id, { regexList: rules });
+    else
+      setNodes((old) => [
+        ...old,
+        {
+          id: `node-regex-${crypto.randomUUID()}`,
+          type: 'regexFilter',
+          position: screenToFlowPosition({ x: 700, y: 300 }),
+          data: { regexList: rules, onUpdate: handleNodeUpdate },
+        },
+      ]);
+    setStatusMessage(
+      `正则导入完成：按顺序新增 ${imported.length - skipped} 条，跳过 ${skipped} 条重复规则；请保存预设`,
+    );
+  };
+  const deleteCanvasSelection = () => {
+    if (!pendingCanvasDelete) return;
+    setCanvasUndo({ nodes, edges, prompts: allPromptsList });
+    const removed = new Set(pendingCanvasDelete.nodes.map((n) => n.id));
+    const removedEdges = new Set(pendingCanvasDelete.edges.map((e) => e.id));
+    const prompts = allPromptsList.filter((p, i) => !removed.has(`prompt-${p.identifier || i}`));
+    setAllPromptsList(prompts);
+    basePresetRef.current = withPromptOrder(basePresetRef.current ?? {}, prompts);
+    const enabledPrompts = prompts.filter((p) => p.enabled !== false);
+    setNodes((old) =>
+      old
+        .filter((n) => !removed.has(n.id))
+        .map((n) =>
+          n.type === 'promptBlock'
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  calcIndex: enabledPrompts.findIndex((p) => `prompt-${p.identifier}` === n.id) + 1,
+                },
+              }
+            : n,
+        ),
+    );
+    setEdges((old) =>
+      old.filter(
+        (e) => !removedEdges.has(e.id) && !removed.has(e.source) && !removed.has(e.target),
+      ),
+    );
+    if (activeEditorId && removed.has(activeEditorId)) setActiveEditorId(null);
+    setPendingCanvasDelete(null);
+    setStatusMessage('已删除选中节点/连线并同步条目列表；保存后持久生效，可撤销本次删除');
+  };
 
   const handleSelectPresetFromLibrary = useCallback(
     async (name: string, path: string) => {
@@ -630,14 +823,7 @@ function FlowWorkspace() {
         };
       } else if (type === 'regexFilter') {
         defaultData = {
-          regexList: [
-            {
-              scriptName: '清洗思考标签',
-              findRegex: '<think>[\\s\\S]*?<\\/think>',
-              replaceString: '',
-              disabled: false,
-            },
-          ],
+          regexList: [],
           onUpdate: handleNodeUpdate,
         };
       }
@@ -816,6 +1002,7 @@ function FlowWorkspace() {
         allPromptsList,
         nodes,
         basePresetRef.current ?? undefined,
+        edges,
       );
       const result = compilePrompt({
         character: chatCharacter ?? detailCharacter ?? { name: '预览角色' },
@@ -862,6 +1049,7 @@ function FlowWorkspace() {
           }
         }}
         onImportPreset={handleImportPreset}
+        onImportRegex={handleImportRegex}
         onSaveCurrentPreset={handleSaveCurrentPreset}
         onNewPreset={handleNewPreset}
         onDeletePreset={handleDeletePreset}
@@ -917,47 +1105,113 @@ function FlowWorkspace() {
             />
 
             <div className="flex-1 h-full relative" onContextMenu={handleContextMenu}>
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                nodeTypes={nodeTypes}
-                fitView
-                colorMode={(previewPreferences ?? preferencesOf(appSettings)).theme}
-                minZoom={0.05}
-                maxZoom={2}
-                panOnDrag={[1, 2]}
-                zoomOnScroll={true}
-                panOnScroll={false}
-                selectionOnDrag={false}
-                onlyRenderVisibleElements={true}
-                defaultEdgeOptions={{
-                  animated: false,
-                }}
-                className="bg-[#090b10]"
-              >
-                <Background
-                  color="var(--line)"
-                  gap={24}
-                  size={1.5}
-                  variant={BackgroundVariant.Dots}
-                  className="opacity-70"
-                />
-                <Controls
-                  position="bottom-left"
-                  className="!bg-slate-900/90 !border-slate-800 !rounded-xl !shadow-2xl overflow-hidden [&>button]:!bg-transparent [&>button]:!border-b [&>button]:!border-slate-800 [&>button]:!text-slate-300 [&>button:hover]:!bg-slate-800"
-                />
-                <MiniMap
-                  position="bottom-right"
-                  nodeStrokeColor="var(--faint)"
-                  nodeColor="var(--panel-3)"
-                  nodeBorderRadius={6}
-                  maskColor="rgba(9, 11, 16, 0.75)"
-                  className="!bg-slate-950/80 !border-slate-800 !rounded-xl !shadow-2xl overflow-hidden"
-                />
-              </ReactFlow>
+              <RegexNodeActions.Provider value={regexActions}>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  onNodeContextMenu={(event, node) => {
+                    const target = event.target;
+                    if (
+                      target instanceof HTMLElement &&
+                      target.closest('input,textarea,select,[contenteditable="true"]')
+                    ) {
+                      event.stopPropagation();
+                      return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
+                  }}
+                  onEdgeContextMenu={(event, edge) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setContextMenu({ x: event.clientX, y: event.clientY, edgeId: edge.id });
+                  }}
+                  connectOnClick
+                  connectionRadius={24}
+                  deleteKeyCode={['Backspace', 'Delete']}
+                  onBeforeDelete={async (selection) => {
+                    const target = document.activeElement;
+                    if (
+                      document.querySelector('[role="dialog"]') ||
+                      (target instanceof HTMLElement &&
+                        (target.matches('input,textarea,select') || target.isContentEditable))
+                    )
+                      return false;
+                    setPendingCanvasDelete(selection);
+                    return false;
+                  }}
+                  nodeTypes={nodeTypes}
+                  fitView
+                  colorMode={(previewPreferences ?? preferencesOf(appSettings)).theme}
+                  minZoom={0.05}
+                  maxZoom={2}
+                  panOnDrag={[1, 2]}
+                  zoomOnScroll={true}
+                  panOnScroll={false}
+                  selectionOnDrag={false}
+                  onlyRenderVisibleElements={true}
+                  defaultEdgeOptions={{
+                    animated: false,
+                  }}
+                  className="bg-[#090b10]"
+                >
+                  <Background
+                    color="var(--line)"
+                    gap={24}
+                    size={1.5}
+                    variant={BackgroundVariant.Dots}
+                    className="opacity-70"
+                  />
+                  <Controls
+                    position="bottom-left"
+                    className="!bg-slate-900/90 !border-slate-800 !rounded-xl !shadow-2xl overflow-hidden [&>button]:!bg-transparent [&>button]:!border-b [&>button]:!border-slate-800 [&>button]:!text-slate-300 [&>button:hover]:!bg-slate-800"
+                  />
+                  <MiniMap
+                    position="bottom-right"
+                    nodeStrokeColor="var(--faint)"
+                    nodeColor="var(--panel-3)"
+                    nodeBorderRadius={6}
+                    maskColor="rgba(9, 11, 16, 0.75)"
+                    className="!bg-slate-950/80 !border-slate-800 !rounded-xl !shadow-2xl overflow-hidden"
+                  />
+                </ReactFlow>
+              </RegexNodeActions.Provider>
+              <div className="absolute bottom-4 left-20 z-10 flex gap-2">
+                <button
+                  className="button"
+                  disabled={!nodes.some((n) => n.selected) && !edges.some((e) => e.selected)}
+                  onClick={() =>
+                    setPendingCanvasDelete({
+                      nodes: nodes.filter((n) => n.selected),
+                      edges: edges.filter((e) => e.selected),
+                    })
+                  }
+                >
+                  删除选中节点/连线
+                </button>
+                {canvasUndo && (
+                  <button
+                    className="button"
+                    onClick={() => {
+                      setNodes(canvasUndo.nodes);
+                      setEdges(canvasUndo.edges);
+                      setAllPromptsList(canvasUndo.prompts);
+                      basePresetRef.current = withPromptOrder(
+                        basePresetRef.current ?? {},
+                        canvasUndo.prompts,
+                      );
+                      setCanvasUndo(null);
+                      setStatusMessage('已撤销画布删除，请保存预设');
+                    }}
+                  >
+                    撤销画布删除
+                  </button>
+                )}
+              </div>
 
               {contextMenu && (
                 <CanvasContextMenu
@@ -965,6 +1219,16 @@ function FlowWorkspace() {
                   y={contextMenu.y}
                   onClose={() => setContextMenu(null)}
                   onAddNode={handleAddNodeFromContextMenu}
+                  deleteLabel={contextMenu.edgeId ? '删除此连线' : '删除此节点'}
+                  onDelete={
+                    contextMenu.nodeId || contextMenu.edgeId
+                      ? () =>
+                          setPendingCanvasDelete({
+                            nodes: nodes.filter((n) => n.id === contextMenu.nodeId),
+                            edges: edges.filter((e) => e.id === contextMenu.edgeId),
+                          })
+                      : undefined
+                  }
                 />
               )}
 
@@ -1219,6 +1483,26 @@ function FlowWorkspace() {
           </div>
         )}
       </main>
+      {regexImportTarget !== null && (
+        <RegexImportDialog
+          targetId={regexImportTarget}
+          targets={regexOrder.map((id, i) => ({
+            id,
+            name: `正则节点 #${i + 1} · ${String((nodes.find((n) => n.id === id)?.data.regexList as any[])?.length ?? 0)} 条`,
+          }))}
+          onClose={() => setRegexImportTarget(null)}
+          onApply={applyRegexImport}
+        />
+      )}
+      <ConfirmDialog
+        open={!!pendingCanvasDelete}
+        onClose={() => setPendingCanvasDelete(null)}
+        title="删除画布节点或连线？"
+        description={`将删除 ${pendingCanvasDelete?.nodes.length ?? 0} 个节点及选中的连线。提示词会从条目列表同步移除，相连的线会清理；可以撤销本次删除。`}
+        danger
+        confirmText="确认删除"
+        onConfirm={deleteCanvasSelection}
+      />
       {toast && (
         <div className="app-toast" role="status">
           <span>{toast}</span>

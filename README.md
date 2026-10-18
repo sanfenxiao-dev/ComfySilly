@@ -2,11 +2,13 @@
 
 一个 Rust / Tauri 2 + React / TypeScript 编写的 Windows 桌面角色对话工作室，以节点画布编辑 SillyTavern 预设，集中管理角色卡、世界书、交互前端和独立的对话记忆。
 
-**当前版本：0.4.1 · Windows x64。** 这是早期公开版本，仍有插件兼容边界，不是 SillyTavern 的完全替代品。
+**当前版本：0.4.3 · Windows x64。** 这是早期公开版本，仍有插件兼容边界，不是 SillyTavern 的完全替代品。
+
+0.4.3：支持正则按节点导入、多个 JSON 文件队列排序、正则连线参与实际执行顺序；聊天顶部工具栏可收起，并优化大型预设拖动时的序列化开销。包含 0.4.2 节点删除、撤销与画布保存修复。
 
 ## 下载与开始
 
-在本仓库 **Releases** 页面选择 `v0.4.1`，下载安装程序 `ComfySilly_0.4.1_x64-setup.exe`，或直接运行 `ComfySilly.exe`；另提供 MSI 和 SHA-256 校验清单。运行不需要 Node、Rust、开发服务器或独立浏览器窗口，需要 Windows WebView2 Runtime。
+在本仓库 **Releases** 页面选择 `v0.4.3`，下载安装程序 `ComfySilly_0.4.3_x64-setup.exe`，或直接运行 `ComfySilly.exe`；另提供 MSI 和 SHA-256 校验清单。运行不需要 Node、Rust、开发服务器或独立浏览器窗口，需要 Windows WebView2 Runtime。
 
 1. 在「设置 → 模型与连接」配置 URL、Key、协议和模型，保存。
 2. 在预设、角色书架、世界书栏目使用导入按钮选择文件；角色书本进入详情后可开始新对话或继续历史。
@@ -59,4 +61,4 @@ pnpm exec tauri build
 
 UI 回归需要 Edge 与 Playwright，详见 `web/README.md`；测试夹具不进入生产包。
 
-更新说明：`docs/release-0.4.1.md`；自动记忆设计与边界：`docs/release-0.4.0.md`。使用与安全说明见 `web/README.md` 和 `SECURITY.md`。本项目按 MIT License 发布。
+更新说明：`docs/release-0.4.3.md`；自动记忆设计与边界：`docs/release-0.4.0.md`。使用与安全说明见 `web/README.md` 和 `SECURITY.md`。本项目按 MIT License 发布。

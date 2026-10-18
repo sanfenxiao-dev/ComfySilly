@@ -697,7 +697,7 @@ export function SettingsModal({
               <div className="settings-section">
                 <span className="eyebrow">COMFYSILLY / STUDIO</span>
                 <h3>一个安静的故事工作室</h3>
-                <p>0.4.1 · Windows 桌面版 · Rust / Tauri</p>
+                <p>0.4.3 · Windows 桌面版 · Rust / Tauri</p>
                 <div className="settings-rule" />
                 <h3>你的数据留在本机</h3>
                 <p>

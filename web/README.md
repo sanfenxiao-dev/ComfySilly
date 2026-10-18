@@ -1,10 +1,10 @@
-# ComfySilly Desktop 0.4.1 · 故事工作室
+# ComfySilly Desktop 0.4.3 · 故事工作室
 
 Rust / Tauri 2 + React / TypeScript 的 Windows 桌面应用。生产版不需要浏览器窗口、开发服务器或命令行。
 
 ## 启动与升级
 
-- 交付文件集中在仓库根目录 `releases/0.4.1/`：`ComfySilly.exe` 可直接启动；`ComfySilly_0.4.1_x64-setup.exe` 是安装程序，另附 MSI。旧版保留在 `releases/0.3.0/`。
+- 交付文件集中在仓库根目录 `releases/0.4.3/`：`ComfySilly.exe` 可直接启动；`ComfySilly_0.4.3_x64-setup.exe` 是安装程序，另附 MSI。旧版保留在 `releases/0.3.0/`。
 - 开发构建的原始 EXE 仍位于 `src-tauri/target/release/comfy-silly.exe`。
 - 保持与旧版相同的数据目录：`%APPDATA%/ComfySilly`。升级前建议自行备份整个目录；不要在公开问题报告中上传其中的密钥或私人聊天。
 - 设置会兼容旧版提供商配置，补充用户身份和显示偏好；不会自动扫描下载文件夹或偷偷导入示例角色。
@@ -26,6 +26,14 @@ Rust / Tauri 2 + React / TypeScript 的 Windows 桌面应用。生产版不需�
 7. 书架支持搜索与排序；点击书本进入详情，继续上次、新建、编辑设定或打开角色专属世界书。
 8. 全局世界书支持导入、总开关、编辑、删除；条目支持关键词、常驻、开关、内容、排序/深度等，误删可撤销；原始 JSON 编辑保留其他扩展字段。未知字段能保存，不代表所有插件语义均已执行。
 9. 对话顶部可查看、切换当前预设；生成参数在预设编辑器调整；旧版的本机预算覆盖继续兼容读取。超预算时仅从本次请求省略较早历史并显示提示，不删除本地记录，不自动删减预设与最新一轮对话。
+
+## 正则导入、画布与聊天工具栏
+
+- 在正则节点内点击「导入文件」，导入对话框自动指向该节点；顶部「导入正则」也可选择目标节点或新建节点。
+- 单个节点可依次追加多个 JSON 文件。确认前用队列上下按钮调整文件顺序；默认保留全部规则（含空表达式分隔条目），可选择只在目标节点内去重。
+- 两个正则节点连接 A → B 后，先运行 A 中适用的规则，再运行 B 中适用的规则。节点内按列表顺序运行；节点显示当前执行编号，保存后保留。
+- 节点/连线支持右键删除，选中后 Delete，或 Ctrl 多选后使用左下角删除按钮；删除可撤销，保存后不复活。非正则节点的通用 DAG 执行尚未接入。
+- 对话工具栏右侧可收起/展开，本机记住偏好。切换离开预设页会卸载画布，不在聊天/世界书页继续绘制；拖动节点不再反复序列化整个预设。
 
 ## 自动记忆与模型读取
 
@@ -68,4 +76,4 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib --release
 
 UI 测试使用 Playwright / Edge，可设置 `PLAYWRIGHT_MODULE_DIR` 指向已有依赖目录。`test:studio` / `test:history` 使用明确的 IPC 测试夹具，不接触实际角色库、不发送真实用户聊天。设置 `COMFYSILLY_TEST_CARD` 为本地导入卡 JSON 后，`node tests/era-compat.smoke.mjs` 执行真实作者远程前端与脚本，但只用内存副本和测试生成回复。真实模型微型测试仅在 `COMFYSILLY_LIVE_TEST=1` 时运行。
 
-本轮发布记录见 `../docs/release-0.4.1.md`；自动记忆详见 `../docs/release-0.4.0.md`；旧版兼容修复记录见 `../docs/compatibility-repair.md`。
+本轮发布记录见 `../docs/release-0.4.3.md`；自动记忆详见 `../docs/release-0.4.0.md`；旧版兼容修复记录见 `../docs/compatibility-repair.md`。

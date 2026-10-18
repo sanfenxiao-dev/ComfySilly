@@ -1,14 +1,39 @@
-import React from 'react';
-import { Sparkles, MessageSquare, BookOpen, Terminal, Sliders, Regex, Plus } from 'lucide-react';
+import React, { useEffect } from 'react';
+import {
+  Sparkles,
+  MessageSquare,
+  BookOpen,
+  Terminal,
+  Sliders,
+  Regex,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 
 interface ContextMenuProps {
   x: number;
   y: number;
   onClose: () => void;
   onAddNode: (type: string, pos: { x: number; y: number }) => void;
+  onDelete?: () => void;
+  deleteLabel?: string;
 }
 
-export const CanvasContextMenu: React.FC<ContextMenuProps> = ({ x, y, onClose, onAddNode }) => {
+export const CanvasContextMenu: React.FC<ContextMenuProps> = ({
+  x,
+  y,
+  onClose,
+  onAddNode,
+  onDelete,
+  deleteLabel,
+}) => {
+  useEffect(() => {
+    const close = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', close);
+    return () => document.removeEventListener('keydown', close);
+  }, [onClose]);
   const nodeOptions = [
     {
       type: 'promptBlock',
@@ -56,43 +81,64 @@ export const CanvasContextMenu: React.FC<ContextMenuProps> = ({ x, y, onClose, o
 
   return (
     <div
-      style={{ left: `${x}px`, top: `${y}px` }}
+      role="menu"
+      aria-label="画布操作"
+      style={{
+        left: `${Math.max(8, Math.min(x, window.innerWidth - 296))}px`,
+        top: `${Math.max(8, Math.min(y, window.innerHeight - (onDelete ? 100 : 470)))}px`,
+      }}
       onClick={(e) => e.stopPropagation()}
       className="fixed z-50 w-72 rounded-2xl bg-slate-900/98 border border-slate-700/80 shadow-2xl backdrop-blur-2xl p-2 space-y-1 animate-in fade-in zoom-in-95 duration-100 select-none"
     >
-      <div className="px-2.5 py-1 text-[10px] font-mono font-bold text-slate-400 border-b border-slate-800/80 flex items-center justify-between">
-        <span>新建节点 (ADD NODE)</span>
-        <span className="text-[9px] text-slate-500">ESC 关闭</span>
-      </div>
+      {onDelete ? (
+        <button
+          role="menuitem"
+          className="button button-danger w-full"
+          onClick={() => {
+            onDelete();
+            onClose();
+          }}
+        >
+          <Trash2 size={15} />
+          {deleteLabel ?? '删除节点'}
+        </button>
+      ) : (
+        <>
+          <div className="px-2.5 py-1 text-[10px] font-mono font-bold text-slate-400 border-b border-slate-800/80 flex items-center justify-between">
+            <span>新建节点 (ADD NODE)</span>
+            <span className="text-[9px] text-slate-500">ESC 关闭</span>
+          </div>
 
-      <div className="space-y-1 pt-1">
-        {nodeOptions.map((opt) => {
-          const Icon = opt.icon;
-          return (
-            <button
-              key={opt.type}
-              onClick={() => {
-                onAddNode(opt.type, { x, y });
-                onClose();
-              }}
-              className="w-full flex items-center space-x-2.5 p-2 rounded-xl text-left hover:bg-slate-800/80 transition-all cursor-pointer group"
-            >
-              <div
-                className={`p-1.5 rounded-lg border ${opt.color} group-hover:scale-110 transition-transform`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-slate-200 group-hover:text-violet-300 transition-colors">
-                  {opt.label}
-                </div>
-                <div className="text-[10px] text-slate-500 truncate">{opt.desc}</div>
-              </div>
-              <Plus className="w-3.5 h-3.5 text-slate-600 group-hover:text-violet-400 opacity-0 group-hover:opacity-100 transition-all" />
-            </button>
-          );
-        })}
-      </div>
+          <div className="space-y-1 pt-1">
+            {nodeOptions.map((opt) => {
+              const Icon = opt.icon;
+              return (
+                <button
+                  key={opt.type}
+                  onClick={() => {
+                    onAddNode(opt.type, { x, y });
+                    onClose();
+                  }}
+                  className="w-full flex items-center space-x-2.5 p-2 rounded-xl text-left hover:bg-slate-800/80 transition-all cursor-pointer group"
+                >
+                  <div
+                    className={`p-1.5 rounded-lg border ${opt.color} group-hover:scale-110 transition-transform`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-semibold text-slate-200 group-hover:text-violet-300 transition-colors">
+                      {opt.label}
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate">{opt.desc}</div>
+                  </div>
+                  <Plus className="w-3.5 h-3.5 text-slate-600 group-hover:text-violet-400 opacity-0 group-hover:opacity-100 transition-all" />
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 };

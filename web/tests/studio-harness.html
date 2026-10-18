@@ -113,22 +113,73 @@
         },
         requests: [],
         writes: [],
+        presetWrites: [],
       };
-      const testPresets = new URLSearchParams(location.search).has('presets') ? [
-        {name:'长篇预设',path:'fixture-preset-a', data:{openai_max_context:32768,openai_max_tokens:99999,prompts:[{identifier:'main',content:'PRESET_A_MARKER'},{identifier:'chatHistory',marker:true}]}},
-        {name:'轻量预设',path:'fixture-preset-b', data:{openai_max_context:65536,openai_max_tokens:2048,prompts:[{identifier:'main',content:'PRESET_B_MARKER'},{identifier:'chatHistory',marker:true}]}}
-      ] : [];
+      const testPresets = new URLSearchParams(location.search).has('presets')
+        ? [
+            {
+              name: '长篇预设',
+              path: 'fixture-preset-a',
+              data: {
+                openai_max_context: 32768,
+                openai_max_tokens: 99999,
+                prompts: [
+                  { identifier: 'main', content: 'PRESET_A_MARKER' },
+                  { identifier: 'chatHistory', marker: true },
+                ],
+              },
+            },
+            {
+              name: '轻量预设',
+              path: 'fixture-preset-b',
+              data: {
+                openai_max_context: 65536,
+                openai_max_tokens: 2048,
+                prompts: [
+                  { identifier: 'main', content: 'PRESET_B_MARKER' },
+                  { identifier: 'chatHistory', marker: true },
+                ],
+              },
+            },
+          ]
+        : [];
+      const largeCount = Math.min(
+        1000,
+        Math.max(0, Number(new URLSearchParams(location.search).get('largePreset')) || 0),
+      );
+      if (largeCount && testPresets.length)
+        testPresets[0].data.prompts = Array.from({ length: largeCount }, (_, i) => ({
+          identifier: `large-${i}`,
+          name: `Fixture prompt ${i}`,
+          content: `Fixture prompt ${i} ` + 'test '.repeat(80),
+          enabled: true,
+        }));
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         unregisterCallback: () => {},
         invoke: async (cmd, args) => {
-          if (cmd === 'list_preset_library') return testPresets.map(({name,path})=>({name,path}));
+          if (cmd === 'list_preset_library')
+            return testPresets.map(({ name, path }) => ({ name, path }));
+          if (cmd === 'save_preset_to_library') {
+            if (window.failPresetSave) throw Error('FIXTURE_DISK_FAILURE');
+            const data = JSON.parse(args.content);
+            window.fixtureState.presetWrites.push(data);
+            const old = testPresets.find((p) => p.name === args.name);
+            if (old) old.data = data;
+            else
+              testPresets.push({
+                name: args.name,
+                path: 'fixture-preset-' + testPresets.length,
+                data,
+              });
+            return old?.path ?? testPresets.at(-1).path;
+          }
           if (cmd === 'list_character_library') return characters.map((c) => JSON.stringify(c));
           if (cmd === 'list_worldbook_library')
             return books.map((b) => ({ name: b.storageName ?? b.name, path: b.path }));
           if (cmd === 'load_preset_file') {
-            const preset = testPresets.find(p=>p.path===args.filePath);
-            if(preset) return JSON.stringify(preset.data);
+            const preset = testPresets.find((p) => p.path === args.filePath);
+            if (preset) return JSON.stringify(preset.data);
             const b = books.find((b) => b.path === args.filePath);
             if (!b) throw Error('Unknown fixture path');
             return JSON.stringify(b);

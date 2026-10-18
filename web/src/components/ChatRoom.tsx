@@ -8,6 +8,7 @@ import {
   Trash2,
   History,
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronRight,
   BookOpen,
@@ -224,6 +225,22 @@ export function ChatRoom({
   const [lastPrompt, setLastPrompt] = useState<PromptCompilation | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
   const [sidebar, setSidebar] = useState(false);
+  const [headerCollapsed, setHeaderCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('comfysilly:chat-header-collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const toggleHeader = () =>
+    setHeaderCollapsed((old) => {
+      try {
+        localStorage.setItem('comfysilly:chat-header-collapsed', String(!old));
+      } catch {
+        /* UI still works with unavailable storage. */
+      }
+      return !old;
+    });
   const [sessionSearch, setSessionSearch] = useState('');
   const [greetingOpen, setGreetingOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -722,88 +739,109 @@ export function ChatRoom({
   );
   return (
     <section className={`chat-room layout-${prefs.chatLayout} route-enter`}>
-      <header className="chat-header">
-        <div className="chat-heading">
-          <button className="icon-button" aria-label="返回角色详情" onClick={onBackToShelf}>
-            <ArrowLeft size={19} />
-          </button>
-          <Avatar src={character.avatar_b64} name={character.name} />
-          <div>
-            <h1>{character.name}</h1>
-            <button
-              className="session-title"
-              onClick={() => setSidebar((v) => !v)}
-              disabled={generating}
-              aria-expanded={sidebar}
-            >
-              {current.title}
-              <ChevronDown size={12} />
+      <header className={`chat-header ${headerCollapsed ? 'is-collapsed' : ''}`}>
+        {headerCollapsed ? (
+          <div className="chat-compact-heading">
+            <button className="icon-button" aria-label="返回角色详情" onClick={onBackToShelf}>
+              <ArrowLeft size={16} />
             </button>
+            <span>{character.name}</span>
+            <small title={`当前预设：${presetName}`}>预设：{presetName}</small>
           </div>
-        </div>
-        <div className="chat-header-actions">
-          <label className="chat-preset-picker">
-            <span>当前预设</span>
-            <select
-              aria-label="当前对话预设"
-              value={presetKey}
-              disabled={generating || switchingPreset || !onSelectPreset}
-              onChange={async (e) => {
-                const item = presets.find((p) => p.path === e.target.value);
-                if (!item || !onSelectPreset) return;
-                setSwitchingPreset(true);
-                try {
-                  const switched = await onSelectPreset(item.name, item.path);
-                  if (switched === false) throw new Error('未能读取所选预设，当前预设保持不变');
-                  setNotice(`已切换预设：${item.name}，下一次生成使用新预设。`);
-                } catch (error) {
-                  setNotice(`切换预设失败：${String(error)}`);
-                } finally {
-                  setSwitchingPreset(false);
-                }
-              }}
-            >
-              {!presets.some((p) => p.path === presetKey) && (
-                <option value={presetKey}>{presetName}</option>
+        ) : (
+          <>
+            <div className="chat-heading">
+              <button className="icon-button" aria-label="返回角色详情" onClick={onBackToShelf}>
+                <ArrowLeft size={19} />
+              </button>
+              <Avatar src={character.avatar_b64} name={character.name} />
+              <div>
+                <h1>{character.name}</h1>
+                <button
+                  className="session-title"
+                  onClick={() => setSidebar((v) => !v)}
+                  disabled={generating}
+                  aria-expanded={sidebar}
+                >
+                  {current.title}
+                  <ChevronDown size={12} />
+                </button>
+              </div>
+            </div>
+            <div className="chat-header-actions">
+              <label className="chat-preset-picker">
+                <span>当前预设</span>
+                <select
+                  aria-label="当前对话预设"
+                  value={presetKey}
+                  disabled={generating || switchingPreset || !onSelectPreset}
+                  onChange={async (e) => {
+                    const item = presets.find((p) => p.path === e.target.value);
+                    if (!item || !onSelectPreset) return;
+                    setSwitchingPreset(true);
+                    try {
+                      const switched = await onSelectPreset(item.name, item.path);
+                      if (switched === false) throw new Error('未能读取所选预设，当前预设保持不变');
+                      setNotice(`已切换预设：${item.name}，下一次生成使用新预设。`);
+                    } catch (error) {
+                      setNotice(`切换预设失败：${String(error)}`);
+                    } finally {
+                      setSwitchingPreset(false);
+                    }
+                  }}
+                >
+                  {!presets.some((p) => p.path === presetKey) && (
+                    <option value={presetKey}>{presetName}</option>
+                  )}
+                  {presets.map((p) => (
+                    <option key={p.path} value={p.path}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="button button-quiet" onClick={() => setMemoryOpen(true)}>
+                <BookOpen size={15} />
+                <span>对话记忆</span>
+              </button>
+              <button className="button button-quiet" onClick={onOpenLorebookModal}>
+                <BookOpen size={15} />
+                <span>角色世界书</span>
+              </button>
+              {greetings.length > 0 && (
+                <button
+                  className="button button-quiet"
+                  disabled={generating}
+                  onClick={() => setGreetingOpen(true)}
+                >
+                  开场剧情 ({greetings.length})
+                </button>
               )}
-              {presets.map((p) => (
-                <option key={p.path} value={p.path}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="button button-quiet" onClick={() => setMemoryOpen(true)}>
-            <BookOpen size={15} />
-            <span>对话记忆</span>
-          </button>
-          <button className="button button-quiet" onClick={onOpenLorebookModal}>
-            <BookOpen size={15} />
-            <span>角色世界书</span>
-          </button>
-          {greetings.length > 0 && (
-            <button
-              className="button button-quiet"
-              disabled={generating}
-              onClick={() => setGreetingOpen(true)}
-            >
-              开场剧情 ({greetings.length})
-            </button>
-          )}
-          <button
-            className={`icon-button ${sidebar ? 'is-active' : ''}`}
-            disabled={generating}
-            title="历史与分支"
-            aria-label="历史与分支"
-            onClick={() => setSidebar((v) => !v)}
-          >
-            <History size={18} />
-          </button>
-          <button className="button" disabled={generating} onClick={() => createSession()}>
-            <Plus size={15} />
-            新对话
-          </button>
-        </div>
+              <button
+                className={`icon-button ${sidebar ? 'is-active' : ''}`}
+                disabled={generating}
+                title="历史与分支"
+                aria-label="历史与分支"
+                onClick={() => setSidebar((v) => !v)}
+              >
+                <History size={18} />
+              </button>
+              <button className="button" disabled={generating} onClick={() => createSession()}>
+                <Plus size={15} />
+                新对话
+              </button>
+            </div>
+          </>
+        )}
+        <button
+          className="icon-button chat-header-toggle"
+          aria-label={headerCollapsed ? '展开对话工具栏' : '收起对话工具栏'}
+          title={headerCollapsed ? '展开对话工具栏' : '收起对话工具栏'}
+          aria-expanded={!headerCollapsed}
+          onClick={toggleHeader}
+        >
+          {headerCollapsed ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
+        </button>
       </header>
       {isFrontend && (
         <div className={`runtime-banner ${trusted ? 'is-trusted' : ''}`}>

@@ -1,4 +1,5 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useContext } from 'react';
+import { RegexNodeActions } from '../RegexImportDialog';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { PromptBlockData } from '../../types/flow';
 import {
@@ -16,6 +17,7 @@ import {
   Edit2,
   ArrowUp,
   ArrowDown,
+  Upload,
 } from 'lucide-react';
 
 export const PromptBlockNode = memo(({ id, data, selected }: NodeProps) => {
@@ -85,7 +87,7 @@ export const PromptBlockNode = memo(({ id, data, selected }: NodeProps) => {
 
   return (
     <div
-      className={`relative w-88 rounded-xl bg-slate-900/95 border transition-all duration-200 shadow-xl overflow-hidden nowheel nopan ${
+      className={`relative w-88 rounded-xl bg-slate-900/95 border transition-all duration-200 shadow-xl overflow-visible nowheel nopan ${
         selected
           ? 'border-violet-500 shadow-violet-500/20 ring-2 ring-violet-500/30'
           : 'border-slate-800 hover:border-slate-700'
@@ -423,16 +425,18 @@ export const LlmInferenceNode = memo(({ data, selected }: NodeProps) => {
 });
 
 /// 🌟 专门处理“预设绑定正则（Regex Filter）”的管线节点 (支持自由上移/下移调序、自由编辑、增删规则、开关规则！)
-export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
+export const RegexFilterNode = memo(({ id, data, selected }: NodeProps) => {
   const d = data as any;
   const regexList: any[] = d.regexList || [];
+  const actions = useContext(RegexNodeActions);
+  const pipelineIndex = actions.order.indexOf(id) + 1;
 
   const handleToggleRule = useCallback(
     (idx: number) => {
       const updated = [...regexList];
       updated[idx] = { ...updated[idx], disabled: !updated[idx].disabled };
       if (typeof d.onUpdate === 'function') {
-        d.onUpdate('node-regex-filter', { regexList: updated });
+        d.onUpdate(id, { regexList: updated });
       }
     },
     [regexList, d],
@@ -442,7 +446,7 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
     (idx: number) => {
       const updated = regexList.filter((_, i) => i !== idx);
       if (typeof d.onUpdate === 'function') {
-        d.onUpdate('node-regex-filter', { regexList: updated });
+        d.onUpdate(id, { regexList: updated });
       }
     },
     [regexList, d],
@@ -457,7 +461,7 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
       const [moved] = updated.splice(idx, 1);
       updated.splice(targetIdx, 0, moved);
       if (typeof d.onUpdate === 'function') {
-        d.onUpdate('node-regex-filter', { regexList: updated });
+        d.onUpdate(id, { regexList: updated });
       }
     },
     [regexList, d],
@@ -465,13 +469,14 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
 
   const handleAddRule = useCallback(() => {
     const newRule = {
+      id: crypto.randomUUID(),
       scriptName: '新正则规则',
       findRegex: '/(待匹配文本)/g',
       replaceString: '$1',
       disabled: false,
     };
     if (typeof d.onUpdate === 'function') {
-      d.onUpdate('node-regex-filter', { regexList: [newRule, ...regexList] });
+      d.onUpdate(id, { regexList: [...regexList, newRule] });
     }
   }, [regexList, d]);
 
@@ -480,7 +485,7 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
       const updated = [...regexList];
       updated[idx] = { ...updated[idx], [field]: value };
       if (typeof d.onUpdate === 'function') {
-        d.onUpdate('node-regex-filter', { regexList: updated });
+        d.onUpdate(id, { regexList: updated });
       }
     },
     [regexList, d],
@@ -488,7 +493,7 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
 
   return (
     <div
-      className={`relative w-96 rounded-xl bg-slate-900/95 border transition-all duration-200 shadow-xl overflow-hidden nowheel ${
+      className={`relative w-96 rounded-xl bg-slate-900/95 border transition-all duration-200 shadow-xl overflow-visible nowheel ${
         selected
           ? 'border-teal-500 shadow-teal-500/25 ring-2 ring-teal-500/30'
           : 'border-slate-800 hover:border-slate-700'
@@ -499,9 +504,22 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
           <div className="p-1 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20">
             <Regex className="w-3.5 h-3.5" />
           </div>
-          <span className="text-xs font-semibold text-slate-200">预设绑定正则 (Regex Binder)</span>
+          <span className="text-xs font-semibold text-slate-200">
+            正则节点 #{pipelineIndex || '—'}
+          </span>
         </div>
         <div className="flex items-center space-x-1.5">
+          <button
+            className="p-1 rounded text-teal-400 hover:bg-teal-500/20 nodrag"
+            title="导入 JSON 到此节点"
+            aria-label="导入 JSON 到此节点"
+            onClick={(e) => {
+              e.stopPropagation();
+              actions.onImport(id);
+            }}
+          >
+            <Upload className="w-3.5 h-3.5" />
+          </button>
           <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-teal-500/20 text-teal-300">
             {regexList.length} 条
           </span>
@@ -517,8 +535,10 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
 
       <div className="p-3 space-y-2 text-xs text-slate-300">
         <div className="text-[11px] text-slate-400 flex justify-between">
-          <span>流式执行序: 从上到下过滤</span>
-          <span className="text-teal-300 font-mono">Stream Clean Pipeline</span>
+          <span>执行顺序 #{pipelineIndex || '—'} · 节点内从上到下</span>
+          <button className="text-teal-300 nodrag" onClick={() => actions.onImport(id)}>
+            导入文件
+          </button>
         </div>
 
         {/* 规则可编辑列表 */}
@@ -528,12 +548,12 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
         >
           {regexList.length === 0 ? (
             <div className="p-4 text-center text-slate-500 text-xs bg-slate-950/40 rounded-lg border border-slate-800">
-              当前预设未包含内置正则规则
+              此节点暂无规则，点击「导入文件」追加 JSON
             </div>
           ) : (
             regexList.map((r, i) => (
               <div
-                key={i}
+                key={r._comfysilly_instanceId ?? r.id ?? `${i}:${r.scriptName}`}
                 className={`p-2 rounded-lg border transition-all ${
                   r.disabled
                     ? 'bg-slate-950/40 border-slate-850 opacity-60'
@@ -549,6 +569,7 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
                     <Edit2 className="w-3 h-3 text-teal-400 flex-shrink-0" />
                     <input
                       type="text"
+                      aria-label={`规则 ${i + 1} 名称`}
                       defaultValue={r.scriptName || r.name || `规则 #${i + 1}`}
                       onBlur={(e) => handleUpdateRuleText(i, 'scriptName', e.target.value)}
                       className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none focus:text-teal-300 truncate w-full"
@@ -596,6 +617,14 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
                     </button>
                   </div>
                 </div>
+                {r._comfysilly_sourceFile && (
+                  <div
+                    className="text-[10px] text-slate-500 truncate mb-1"
+                    title={r._comfysilly_sourceFile}
+                  >
+                    来源：{r._comfysilly_sourceFile}
+                  </div>
+                )}
 
                 {/* 正则表达式 (Find Regex) */}
                 <div className="space-y-1 font-mono text-[11px]">
@@ -603,6 +632,7 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
                     <span className="text-teal-400 select-none">Find:</span>
                     <input
                       type="text"
+                      aria-label={`规则 ${i + 1} 匹配表达式`}
                       defaultValue={r.findRegex || ''}
                       onBlur={(e) => handleUpdateRuleText(i, 'findRegex', e.target.value)}
                       className="w-full bg-transparent text-slate-300 focus:outline-none"
@@ -615,6 +645,7 @@ export const RegexFilterNode = memo(({ data, selected }: NodeProps) => {
                     <span className="text-indigo-400 select-none">Replace:</span>
                     <input
                       type="text"
+                      aria-label={`规则 ${i + 1} 替换内容`}
                       defaultValue={r.replaceString ?? ''}
                       onBlur={(e) => handleUpdateRuleText(i, 'replaceString', e.target.value)}
                       className="w-full bg-transparent text-slate-300 focus:outline-none"

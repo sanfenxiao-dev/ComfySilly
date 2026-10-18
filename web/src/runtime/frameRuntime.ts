@@ -1,9 +1,10 @@
 import $ from 'jquery';
 import _ from 'lodash';
 import * as Vue from 'vue/dist/vue.esm-bundler.js';
-import * as Zod from 'zod';
+import * as Zod from 'zod/v4';
 import * as Pinia from 'pinia';
 import * as YAML from 'yaml';
+import { installLegacyHost } from './legacyHost';
 
 type Obj = Record<string, any>;
 const w = window as unknown as Obj;
@@ -52,30 +53,96 @@ if (nativeFetch && (window as any).__COMFY_CARD__?.networkProxy) {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (/^https?:\/\//i.test(url)) {
       const headers: Record<string, string> = {};
-      new Headers(init?.headers ?? (typeof input === 'object' && 'headers' in input ? input.headers : undefined)).forEach((v, k) => (headers[k] = v));
-      return cardNetworkRequest({ url, method: init?.method ?? 'GET', headers, body: typeof init?.body === 'string' ? init.body : undefined });
+      new Headers(
+        init?.headers ??
+          (typeof input === 'object' && 'headers' in input ? input.headers : undefined),
+      ).forEach((v, k) => (headers[k] = v));
+      return cardNetworkRequest({
+        url,
+        method: init?.method ?? 'GET',
+        headers,
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
     }
     return nativeFetch(input, init);
   }) as typeof fetch;
 }
 class CardXMLHttpRequest {
-  method = 'GET'; url = ''; async = true; status = 0; readyState = 0; responseText = ''; response = '';
-  onload: (() => void) | null = null; onerror: (() => void) | null = null; onabort: (() => void) | null = null; ontimeout: (() => void) | null = null; onreadystatechange: (() => void) | null = null;
+  method = 'GET';
+  url = '';
+  async = true;
+  status = 0;
+  readyState = 0;
+  responseText = '';
+  response = '';
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+  ontimeout: (() => void) | null = null;
+  onreadystatechange: (() => void) | null = null;
   timeout = 0;
   private headers: Record<string, string> = {};
   private responseHeaders: Record<string, string> = {};
   private listeners = new Map<string, Set<() => void>>();
-  open(method: string, url: string, async = true) { this.method = method; this.url = url; this.async = async; this.readyState = 1; this.onreadystatechange?.(); }
-  setRequestHeader(name: string, value: string) { this.headers[name] = value; }
-  addEventListener(name: string, handler: () => void) { if (!this.listeners.has(name)) this.listeners.set(name, new Set()); this.listeners.get(name)!.add(handler); }
-  private emit(name: string) { this.listeners.get(name)?.forEach((handler) => handler()); }
-  send(body?: string) { void cardNetworkRequest({ url: this.url, method: this.method, headers: this.headers, body }).then(async (r) => { this.status = r.status; r.headers.forEach((v, k) => { this.responseHeaders[k.toLowerCase()] = v; }); return r.text(); }).then((text) => { this.responseText = text; this.response = text; this.readyState = 4; this.onreadystatechange?.(); this.emit('readystatechange'); this.onload?.(); this.emit('load'); }).catch(() => { this.readyState = 4; this.onreadystatechange?.(); this.emit('readystatechange'); this.onerror?.(); this.emit('error'); }); }
-  abort() { this.onabort?.(); this.emit('abort'); }
-  getAllResponseHeaders() { return Object.entries(this.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\r\n'); }
-  getResponseHeader(name: string) { return this.responseHeaders[name.toLowerCase()] ?? null; }
+  open(method: string, url: string, async = true) {
+    this.method = method;
+    this.url = url;
+    this.async = async;
+    this.readyState = 1;
+    this.onreadystatechange?.();
+  }
+  setRequestHeader(name: string, value: string) {
+    this.headers[name] = value;
+  }
+  addEventListener(name: string, handler: () => void) {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name)!.add(handler);
+  }
+  private emit(name: string) {
+    this.listeners.get(name)?.forEach((handler) => handler());
+  }
+  send(body?: string) {
+    void cardNetworkRequest({ url: this.url, method: this.method, headers: this.headers, body })
+      .then(async (r) => {
+        this.status = r.status;
+        r.headers.forEach((v, k) => {
+          this.responseHeaders[k.toLowerCase()] = v;
+        });
+        return r.text();
+      })
+      .then((text) => {
+        this.responseText = text;
+        this.response = text;
+        this.readyState = 4;
+        this.onreadystatechange?.();
+        this.emit('readystatechange');
+        this.onload?.();
+        this.emit('load');
+      })
+      .catch(() => {
+        this.readyState = 4;
+        this.onreadystatechange?.();
+        this.emit('readystatechange');
+        this.onerror?.();
+        this.emit('error');
+      });
+  }
+  abort() {
+    this.onabort?.();
+    this.emit('abort');
+  }
+  getAllResponseHeaders() {
+    return Object.entries(this.responseHeaders)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\r\n');
+  }
+  getResponseHeader(name: string) {
+    return this.responseHeaders[name.toLowerCase()] ?? null;
+  }
   overrideMimeType() {}
 }
-if ((window as any).__COMFY_CARD__?.networkProxy) (globalThis as any).XMLHttpRequest = CardXMLHttpRequest;
+if ((window as any).__COMFY_CARD__?.networkProxy)
+  (globalThis as any).XMLHttpRequest = CardXMLHttpRequest;
 let lastReportedError = '';
 let lastReportedAt = 0;
 const report = (error: unknown) => {
@@ -89,6 +156,54 @@ const report = (error: unknown) => {
   post('error', { message });
 };
 const clone = <T>(v: T): T => structuredClone(v);
+const sharedObjects = new Map<string, any>();
+const safeKey = (key: string) => !['__proto__', 'prototype', 'constructor'].includes(key);
+const describe = (value: any, path: string[] = [], seen = new Set<any>()): any => {
+  if (typeof value === 'function') return { kind: 'function', path };
+  if (value === null || ['string', 'number', 'boolean'].includes(typeof value))
+    return { kind: 'value', value };
+  if (!value || typeof value !== 'object' || seen.has(value) || path.length > 5)
+    return { kind: 'value', value: null };
+  seen.add(value);
+  const entries = Object.fromEntries(
+    Object.keys(value)
+      .filter(safeKey)
+      .slice(0, 100)
+      .map((key) => [key, describe(value[key], [...path, key], seen)]),
+  );
+  return { kind: 'object', entries };
+};
+const initializeGlobal = (name: string, value: any) => {
+  if (typeof name !== 'string' || !safeKey(name) || name.length > 100)
+    throw Error('共享接口名称无效');
+  sharedObjects.set(name, value);
+  w[name] = value;
+  post('publishGlobal', { name, descriptor: describe(value) });
+};
+function receiveGlobal(name: string, descriptor: any): any {
+  const create = (d: any): any =>
+    d?.kind === 'function'
+      ? (...args: any[]) => rpc('callGlobal', [name, d.path, args])
+      : d?.kind === 'object'
+        ? Object.fromEntries(
+            Object.entries(d.entries ?? {})
+              .filter(([key]) => safeKey(key))
+              .map(([key, v]) => [key, create(v)]),
+          )
+        : d?.value;
+  if (sharedObjects.has(name)) return;
+  const value = create(descriptor);
+  // These documented MVU methods are synchronous snapshot accessors, not remote calls.
+  if (name === 'Mvu' && value)
+    Object.assign(value, {
+      getMvuData: getVariables,
+      replaceMvuData: replaceVariables,
+      getCurrentMvuData: () => getVariables({ type: 'message', message_id: getCurrentMessageId() }),
+      replaceCurrentMvuData: (data: Obj) =>
+        replaceVariables(data, { type: 'message', message_id: getCurrentMessageId() }),
+    });
+  w[name] = value;
+}
 const eventOn = (name: string, fn: (...a: any[]) => unknown) => {
   if (!listeners.has(name)) listeners.set(name, new Set());
   listeners.get(name)!.add(fn);
@@ -132,6 +247,22 @@ window.addEventListener('message', (event) => {
   )
     return;
   const data = event.data;
+  if (data.type === 'sharedGlobal') receiveGlobal(data.name, data.descriptor);
+  if (data.type === 'invokeGlobal')
+    void (async () => {
+      try {
+        const path = data.path as string[];
+        if (!Array.isArray(path) || !path.every(safeKey)) throw Error('共享接口路径无效');
+        let owner = sharedObjects.get(data.name);
+        for (const key of path.slice(0, -1)) owner = owner?.[key];
+        const fn = path.length ? owner?.[path.at(-1)!] : owner;
+        if (typeof fn !== 'function') throw Error('共享接口尚未就绪或不支持');
+        const value = await fn.apply(owner, data.args ?? []);
+        post('globalResult', { id: data.id, value });
+      } catch (error) {
+        post('globalResult', { id: data.id, error: String(error) });
+      }
+    })();
   if (data.type === 'result') {
     const item = pending.get(data.id);
     if (item) {
@@ -351,6 +482,7 @@ const helpers: Obj = {
   getSillyTavern: context,
   getContext: context,
   getCharacterName: () => snapshot.character.name,
+  initializeGlobal,
   waitGlobalInitialized: async (name: string) => {
     const start = Date.now();
     while (!w[name]) {
@@ -376,7 +508,15 @@ Object.assign(w, {
   tavern_events,
   iframe_events,
   TavernHelper: helpers,
-  SillyTavern: { getContext: context },
+  SillyTavern: new Proxy(
+    { getContext: context },
+    {
+      get: (target, key) =>
+        key in target
+          ? (target as Obj)[key as string]
+          : context()[key as keyof ReturnType<typeof context>],
+    },
+  ),
   toastr: Object.fromEntries(
     ['info', 'success', 'warning', 'error'].map((level) => [
       level,
@@ -385,6 +525,7 @@ Object.assign(w, {
   ),
 });
 w.__COMFY_RUNTIME_READY__ = true;
+installLegacyHost(initializeGlobal);
 // CDN modules must share the same Vue reactivity graph as the host-provided globals.
 const moduleUrls: string[] = [];
 const imports: Record<string, string> = {};
@@ -494,7 +635,9 @@ $(async () => {
         }
         post('scriptLoaded', { name: script.name });
       } catch (error) {
-        report(`${script.name}: ${String(error)}`);
+        report(
+          `${script.name}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+        );
       }
     }
     post('backgroundReady');
