@@ -99,8 +99,12 @@ export class CardBridge {
   private receive = (event: MessageEvent) => {
     const data = event.data;
     if (!data || data.channel !== 'comfysilly-card-v1') return;
+    // WebView2 can report a null/unstable source for messages crossing a
+    // sandboxed srcDoc boundary. The per-frame unguessable token is the
+    // capability; use it as the fallback while still checking the source
+    // whenever the browser supplies one.
     const entry = [...this.frames.entries()].find(
-      ([, f]) => f.window === event.source && f.token === data.token,
+      ([, f]) => f.token === data.token && (!event.source || f.window === event.source),
     );
     if (!entry) return;
     const [frameId, frame] = entry;

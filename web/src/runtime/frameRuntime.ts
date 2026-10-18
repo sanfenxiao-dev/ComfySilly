@@ -126,7 +126,7 @@ async function dispatch(name: string, args: any[]) {
 }
 window.addEventListener('message', (event) => {
   if (
-    event.source !== window.parent ||
+    (event.source && event.source !== window.parent) ||
     event.data?.channel !== 'comfysilly-card-v1' ||
     event.data.token !== token
   )
