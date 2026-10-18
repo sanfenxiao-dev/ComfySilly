@@ -1,6 +1,6 @@
 [package]
 name = "comfy-silly"
-version = "0.4.0"
+version = "0.4.1"
 description = "ComfySilly - Node-based SillyTavern Workflow Desktop Engine"
 authors = ["you"]
 edition = "2024"

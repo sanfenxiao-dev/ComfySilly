@@ -69,7 +69,7 @@ export function generationBudget(preset?: SillyPresetJson | null): GenerationBud
   if (maxOutputTokens >= contextWindow) {
     maxOutputTokens = Math.min(4096, Math.floor(contextWindow / 4));
     warnings.push(
-      `预设回复上限 ${rawOutput} 不小于上下文 ${contextWindow}，本次按 ${maxOutputTokens} 回复 tokens 请求；原预设未修改，可在“生成参数”中调整。`,
+      `预设回复上限 ${rawOutput} 不小于上下文 ${contextWindow}，本次按 ${maxOutputTokens} 回复 tokens 请求；原预设未修改，可在预设编辑器中调整生成参数。`,
     );
   }
   if (contextWindow !== rawContext)
@@ -416,7 +416,7 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
   const estimatedTokens = tokens();
   if (estimatedTokens > budget.inputBudget)
     throw new Error(
-      `输入约 ${estimatedTokens} tokens（字符估算），当前输入预算 ${budget.inputBudget} = 上下文 ${budget.contextWindow} − 回复预留 ${budget.maxOutputTokens}。请打开“生成参数”按模型能力调整上下文/回复上限，或缩短当前消息、角色设定与世界书；预设提示词和最新一轮对话不会自动删减。`,
+      `输入约 ${estimatedTokens} tokens（字符估算），当前输入预算 ${budget.inputBudget} = 上下文 ${budget.contextWindow} − 回复预留 ${budget.maxOutputTokens}。请在预设编辑器中按模型能力调整上下文/回复上限，或缩短当前消息、角色设定与世界书；预设提示词和最新一轮对话不会自动删减。`,
     );
   if (removed.size)
     warnings.push(

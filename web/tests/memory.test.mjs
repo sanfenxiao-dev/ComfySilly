@@ -4,7 +4,7 @@ import { emptyMemoryContent, prefixDigest, usableMemory, forkMemory, nextMemoryB
   parseMemoryResponse, memoryPromptBlock, memoryContext, memoryExtractionMessages } from '../src/utils/memory.ts';
 import { forkSession, addVariant, chooseVariant } from '../src/utils/chatHistory.ts';
 import { compilePrompt } from '../src/utils/promptCompiler.ts';
-import { memoryOf, normalizeSettings } from '../src/types/settings.ts';
+import { memoryOf, preferencesOf, normalizeSettings } from '../src/types/settings.ts';
 const messages = (n = 20) => Array.from({ length: n }, (_, i) => ({
   id: `m-${i}`, content: `消息${i}`, role: i % 2 ? 'assistant' : 'user', timestamp: '2026-10-18',
 }));
@@ -15,6 +15,15 @@ const checkpoint = (history, completed, summary = '过去的故事', offset = 0)
 const memory = (history, counts = [4, 12, 18]) => ({
   version: 1, characterId: 'card-A', sessionId: 'session-A', revision: 'r1',
   checkpoints: counts.map(n => checkpoint(history, n)),
+});
+test('display limits migrate independently of memory and reject non-finite or fractional settings', () => {
+  assert.equal(preferencesOf().visibleMessageCount, 80);
+  for (const [raw, expected] of [[Infinity,80],[NaN,80],['invalid',80],[-2,10],[900,500],[24.9,24]]) {
+    const s = normalizeSettings({ providers: [], preferences: { visibleMessageCount: raw }, memory: {recentMessages: 50} });
+    assert.equal(s.preferences.visibleMessageCount, expected);
+    assert.equal(s.memory.recentMessages, 50);
+  }
+  assert.equal(memoryOf({ memory: { recentMessages: 500 } }).recentMessages, 200);
 });
 test('automatic memory is opt-in, bounded, migrated without touching provider/persona config', () => {
   assert.equal(memoryOf().enabled, false);

@@ -433,6 +433,24 @@ export function SettingsModal({
                   />
                 </div>
                 <label className="field">
+                  默认显示最近消息数
+                  <input
+                    className="text-input"
+                    type="number"
+                    min="10"
+                    max="500"
+                    step="1"
+                    value={draft.preferences?.visibleMessageCount ?? prefs.visibleMessageCount}
+                    onChange={(e) => patchPrefs({ visibleMessageCount: Number(e.target.value) })}
+                    onBlur={() => patchPrefs({ visibleMessageCount: prefs.visibleMessageCount })}
+                  />
+                  <span className="field-hint">
+                    默认 80 条，可设 10–500 条。用户或 AI 的一次发言各算一条，不是一轮。
+                    超出的消息只在界面隐藏，不删除、不限制模型读取；可在对话顶部加载更早消息。
+                    切换对话或修改此设置后恢复这个显示范围。
+                  </span>
+                </label>
+                <label className="field">
                   发送快捷键
                   <select
                     className="text-input"
@@ -449,6 +467,17 @@ export function SettingsModal({
               <div className="inline-note">
                 历史修改与历史重生成会创建独立分支，原对话保持不变。最后一条 AI
                 回复可直接切换多个生成版本。
+              </div>
+              <div className="settings-section">
+                <h3>模型历史读取</h3>
+                <p>
+                  界面显示条数与模型上下文完全独立。启用自动记忆后，可配置发送给模型的近期原文条数，
+                  更早且已经整理的消息由记忆替代；尚未整理的原文仍会发送，不会直接截断丢失。
+                  未启用记忆时沿用预设的上下文预算，超限时会裁剪较早历史并提示。
+                </p>
+                <button className="button button-quiet" onClick={() => setSection('memory')}>
+                  配置自动记忆与近期原文
+                </button>
               </div>
             </>
           )}
@@ -509,10 +538,16 @@ export function SettingsModal({
                       className="text-input"
                       type="number"
                       min="6"
-                      max="30"
-                      value={memory.recentMessages}
+                      max="200"
+                      value={draft.memory?.recentMessages ?? memory.recentMessages}
                       onChange={(e) => patchMemory({ recentMessages: Number(e.target.value) })}
+                      onBlur={() => patchMemory({ recentMessages: memory.recentMessages })}
                     />
+                    <span className="field-hint">
+                      模型至少读取的近期原文：6–200 条，默认 12 条。每次发言算一条。
+                      仅启用自动记忆且本对话未暂停时生效，不影响界面显示。
+                      未整理的历史可能使实际发送条数更多；上下文不足会提示，不会静默丢弃。
+                    </span>
                   </label>
                 </div>
                 <label className="field">
@@ -662,7 +697,7 @@ export function SettingsModal({
               <div className="settings-section">
                 <span className="eyebrow">COMFYSILLY / STUDIO</span>
                 <h3>一个安静的故事工作室</h3>
-                <p>0.4.0 · Windows 桌面版 · Rust / Tauri</p>
+                <p>0.4.1 · Windows 桌面版 · Rust / Tauri</p>
                 <div className="settings-rule" />
                 <h3>你的数据留在本机</h3>
                 <p>
@@ -708,10 +743,7 @@ export function SettingsModal({
             const memoryModel = draft.providers.find(
               (p) => p.id === (memoryConfig.providerId || draft.activeProviderId),
             )?.model;
-            if (
-              memoryConfig.enabled &&
-              (typeof memoryModel !== 'string' || !memoryModel.trim())
-            ) {
+            if (memoryConfig.enabled && (typeof memoryModel !== 'string' || !memoryModel.trim())) {
               setError('请先为自动记忆选择已配置模型的连接，或暂时关闭自动记忆。');
               setSection('memory');
               return;

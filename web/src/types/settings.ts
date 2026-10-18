@@ -22,6 +22,7 @@ export interface Preferences {
   fontSize: number;
   showTimestamps: boolean;
   autoScroll: boolean;
+  visibleMessageCount: number;
   sendKey: 'enter' | 'ctrl-enter';
 }
 export interface MemorySettings {
@@ -50,6 +51,7 @@ export const defaultPreferences: Preferences = {
   fontSize: 16,
   showTimestamps: false,
   autoScroll: true,
+  visibleMessageCount: 80,
   sendKey: 'enter',
 };
 export const defaultPersona: Persona = { id: 'user-default', name: '用户', description: '' };
@@ -112,6 +114,7 @@ export function preferencesOf(settings?: AppSettings): Preferences {
     sendKey: p.sendKey === 'ctrl-enter' ? 'ctrl-enter' : 'enter',
     autoScroll: p.autoScroll !== false,
     showTimestamps: p.showTimestamps === true,
+    visibleMessageCount: bounded(p.visibleMessageCount, 10, 500, 80),
     chatLayout: ['centered', 'bubbles', 'compact'].includes(p.chatLayout)
       ? p.chatLayout
       : 'centered',
@@ -142,7 +145,7 @@ export function memoryOf(settings?: AppSettings): MemorySettings {
     enabled: raw.enabled === true,
     providerId: typeof raw.providerId === 'string' ? raw.providerId : '',
     triggerEveryTurns: bounded(raw.triggerEveryTurns, 1, 10, 1),
-    recentMessages: bounded(raw.recentMessages, 6, 30, 12),
+    recentMessages: bounded(raw.recentMessages, 6, 200, 12),
     maxMemoryChars: bounded(raw.maxMemoryChars, 1000, 20000, 12000),
     batchChars: bounded(raw.batchChars, 4000, 40000, 16000),
     maxOutputTokens: bounded(raw.maxOutputTokens, 2048, 8192, 4096),

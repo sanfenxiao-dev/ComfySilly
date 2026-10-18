@@ -150,7 +150,7 @@ export function ChatRoom({
   const activeRef = useRef(activeId);
   activeRef.current = activeId;
   const current = sessions.find((s) => s.id === activeId) ?? sessions[0];
-  const [visibleCount, setVisibleCount] = useState(80);
+  const [visibleCount, setVisibleCount] = useState(prefs.visibleMessageCount);
   const olderAnchor = useRef<{ height: number; top: number } | null>(null);
   const [notice, setNotice] = useState('');
   const [saveError, setSaveError] = useState(false);
@@ -312,11 +312,16 @@ export function ChatRoom({
   useEffect(() => {
     nearBottom.current = true;
     setEditing(null);
-    setVisibleCount(80);
+    olderAnchor.current = null;
+    setVisibleCount(prefs.visibleMessageCount);
     setBelow(false);
     const id = requestAnimationFrame(() => scrollDown(false));
     return () => cancelAnimationFrame(id);
   }, [current.id]);
+  useEffect(() => {
+    olderAnchor.current = null;
+    setVisibleCount(prefs.visibleMessageCount);
+  }, [prefs.visibleMessageCount]);
   useEffect(() => {
     const el = viewport.current?.firstElementChild;
     if (!el) return;
@@ -953,6 +958,19 @@ export function ChatRoom({
                     }}
                   >
                     加载更早的消息 · 还有 {current.messages.length - visibleCount} 条
+                  </button>
+                </div>
+              )}
+              {visibleCount > prefs.visibleMessageCount && (
+                <div className="load-earlier">
+                  <button
+                    onClick={() => {
+                      olderAnchor.current = null;
+                      setVisibleCount(prefs.visibleMessageCount);
+                      requestAnimationFrame(() => scrollDown(false));
+                    }}
+                  >
+                    收起较早消息 · 仅显示最近 {prefs.visibleMessageCount} 条
                   </button>
                 </div>
               )}

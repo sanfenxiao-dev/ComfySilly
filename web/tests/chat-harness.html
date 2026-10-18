@@ -25,8 +25,10 @@ if (new URLSearchParams(location.search).has('generation')) {
 }
 function Harness(){
  const [current,setCurrent]=React.useState(card);
+ const [preferences,setPreferences]=React.useState(()=>JSON.parse(localStorage.getItem('test:preferences')||'{}'));
+ window.updateTestPreferences=next=>{localStorage.setItem('test:preferences',JSON.stringify(next));setPreferences(next);};
  const save=async updated=>{if(window.failNextSave){window.failNextSave=false;throw Error('EXPLICIT_TEST_DISK_FAILURE');}await new Promise(resolve=>setTimeout(resolve,20));setCurrent(updated);window.savedCharacters.push(structuredClone(updated));};
- return React.createElement(ChatRoom,{character:current,settings,onBackToShelf:()=>{},onUpdateCharacterSessions:save,onOpenLorebookModal:()=>{}});
+ return React.createElement(ChatRoom,{character:current,settings:{activeProviderId:'',providers:[],...settings,preferences},onBackToShelf:()=>{},onUpdateCharacterSessions:save,onOpenLorebookModal:()=>{}});
 }
 createRoot(document.getElementById('root')).render(React.createElement(Harness));
 </script></body></html>

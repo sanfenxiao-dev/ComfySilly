@@ -34,6 +34,25 @@ try {
   await page.route('**/__test__/card.json', (r) => r.fulfill({ json: card }));
   await page.goto(server.resolvedUrls.local[0] + 'tests/chat-harness.html?generation=1');
   await page.waitForFunction(() => document.querySelectorAll('.chat-message').length === 80);
+  // Visibility is a presentation preference, NEVER a model history filter.
+  await page.evaluate(() => window.updateTestPreferences({ visibleMessageCount: 20 }));
+  await page.waitForFunction(() => document.querySelectorAll('.chat-message').length === 20);
+  assert.equal(await page.locator('.chat-message').first().getAttribute('data-message-id'), 'history-180');
+  await page.getByRole('textbox', { name: '对话输入' }).fill('隐藏的历史仍需读取');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.waitForFunction(() => window.savedCharacters.at(-1)?.sessions[0].messages.length === 202);
+  const requestText = await page.evaluate(() => window.testRequests[0].messages.map(m=>m.content).join('\n'));
+  for (const m of messages) assert.ok(requestText.includes(m.content), `Hidden message ${m.id} must reach model`);
+  assert.equal(await page.locator('.chat-message').count(), 20);
+  // Fixture reload restores the original 200 messages, while the preference persists.
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.chat-message').length === 20);
+  await page.getByRole('button', { name: '加载更早的消息 · 还有 180 条' }).click();
+  assert.equal(await page.locator('.chat-message').count(), 60);
+  await page.getByRole('button', { name: '收起较早消息 · 仅显示最近 20 条' }).click();
+  assert.equal(await page.locator('.chat-message').count(), 20);
+  await page.evaluate(() => window.updateTestPreferences({ visibleMessageCount: 80 }));
+  await page.waitForFunction(() => document.querySelectorAll('.chat-message').length === 80);
   assert.equal(
     await page.locator('.chat-message').first().getAttribute('data-message-id'),
     'history-120',
@@ -84,7 +103,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    'HISTORY PASS: 200-message bounded rendering, load-more scroll anchor, historical isolation, failed-save retry, no duplicate generation.',
+    'HISTORY PASS: configurable display count and reload, ALL hidden history reaches model, collapse/load-more scroll anchor, historical isolation, failed-save retry, no duplicate generation.',
   );
 } finally {
   await browser.close();

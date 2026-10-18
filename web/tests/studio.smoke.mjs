@@ -103,6 +103,17 @@ try {
   await dialog.waitFor({ state: 'hidden' });
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
   report.checks.push('categorized settings, live theme preview and cancel rollback');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  dialog = page.getByRole('dialog', { name: '设置', exact: true });
+  await dialog.getByRole('button', { name: '对话偏好', exact: true }).click();
+  await dialog.getByRole('spinbutton', { name: '默认显示最近消息数' }).fill('24');
+  await dialog.getByRole('button', { name: '配置自动记忆与近期原文', exact: true }).click();
+  await dialog.getByRole('spinbutton', { name: '保留最近消息数' }).fill('40');
+  await dialog.getByRole('button', { name: '保存设置', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(() => window.fixtureState.settings.preferences.visibleMessageCount), 24);
+  assert.equal(await page.evaluate(() => window.fixtureState.settings.memory.recentMessages), 40);
+  report.checks.push('independent saved display limit and model recent raw history window');
   await page.getByRole('button', { name: '角色与对话', exact: true }).click();
   await page.getByRole('button', { name: '打开角色 雨后的书店' }).click();
   await page.getByRole('heading', { name: '雨后的书店', exact: true }).waitFor();
