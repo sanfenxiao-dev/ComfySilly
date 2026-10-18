@@ -319,17 +319,42 @@ export function ChatRoom({
     obs.observe(el);
     return () => obs.disconnect();
   }, [current.id, prefs.autoScroll]);
-  const compile = (history: ChatSession['messages'], sessionId = current.id) =>
-    compilePrompt({
+  const readStoredVariables = (key: string): Record<string, unknown> => {
+    try {
+      const raw = localStorage.getItem(key);
+      const value = raw ? JSON.parse(raw) : {};
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch {
+      return {};
+    }
+  };
+  const compile = (
+    history: ChatSession['messages'],
+    sessionId = current.id,
+    runtimeSnapshot?: Record<string, Record<string, unknown>>,
+  ) => {
+    const stored = runtimeSnapshot ?? {
+      global: readStoredVariables('comfysilly:global-vars'),
+      preset: readStoredVariables(`comfysilly:preset-vars:${presetKey}`),
+      character: character.extensions?.comfysilly_variables ?? {},
+      chat: sessionsRef.current.find((s) => s.id === sessionId)?.runtimeVariables?.chat ?? {},
+    };
+    return compilePrompt({
       character,
       preset: effectivePreset,
       history,
       worldbooks,
       userName: persona.name,
       personaDescription: persona.description,
-      variables: sessionsRef.current.find((s) => s.id === sessionId)?.runtimeVariables?.chat,
+      variables: {
+        ...stored.global,
+        ...stored.preset,
+        ...stored.character,
+        ...stored.chat,
+      },
       overflowPolicy: 'trim-history',
     });
+  };
   const updateSession = (session: ChatSession) =>
     syncSessions(
       sessionsRef.current.map((s) => (s.id === session.id ? session : s)),
@@ -348,6 +373,7 @@ export function ChatRoom({
     sessionId: string,
     history: ChatSession['messages'],
     replaceId?: string,
+    runtimeSnapshot?: Record<string, Record<string, unknown>>,
   ) => {
     if (generation.current) return;
     if (!provider?.model) {
@@ -390,7 +416,7 @@ export function ChatRoom({
       await updateSession({ ...session, messages, updatedAt: now() });
     };
     try {
-      const compiled = compile(history, sessionId);
+      const compiled = compile(history, sessionId, runtimeSnapshot);
       setLastPrompt(compiled);
       const historyWarning = compiled.warnings.find((w) => w.startsWith('本次请求省略'));
       setNotice(
@@ -445,8 +471,8 @@ export function ChatRoom({
     persist: syncSessions,
     updateCharacter:
       onPatchCharacter ?? ((patch) => onUpdateCharacterSessions({ ...character, ...patch })),
-    generate: async (id, messages) => {
-      const text = await runGeneration(id, messages);
+    generate: async (id, messages, runtimeSnapshot) => {
+      const text = await runGeneration(id, messages, undefined, runtimeSnapshot);
       if (text === undefined) throw new Error('模型生成未完成，请查看聊天提示或 AI 配置');
       return text;
     },

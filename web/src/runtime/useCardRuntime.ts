@@ -13,7 +13,11 @@ interface Options {
   presetKey?: string;
   persist: (sessions: ChatSession[], id?: string) => unknown;
   updateCharacter: (character: Partial<CharacterCardData>) => unknown;
-  generate: (sessionId: string, messages: ChatSession['messages']) => Promise<string | undefined>;
+  generate: (
+    sessionId: string,
+    messages: ChatSession['messages'],
+    runtimeVariables?: Record<string, Record<string, unknown>>,
+  ) => Promise<string | undefined>;
   setInput: (text: string) => void;
   notice: (text: string) => void;
   buttons: (buttons: Array<{ name: string; visible?: boolean }>) => void;
@@ -308,9 +312,9 @@ export function useCardRuntime(options: Options) {
           };
           const messages = [...o.session.messages, message];
           await persistMessages(messages);
-          return await o.generate(o.session.id, messages);
+          return await o.generate(o.session.id, messages, snapshot(latest.current).variables);
         }
-        return await o.generate(o.session.id, o.session.messages);
+        return await o.generate(o.session.id, o.session.messages, snapshot(latest.current).variables);
       }
       case 'triggerSlash':
         return await slash(String(args[0]), bridge, latest);
@@ -378,7 +382,12 @@ async function slash(command: string, bridge: CardBridge, latest: React.RefObjec
       }
       case 'trigger': {
         const updated = latest.current;
-        result = (await updated.generate(updated.session.id, updated.session.messages)) || '';
+        result =
+          (await updated.generate(
+            updated.session.id,
+            updated.session.messages,
+            snapshot(latest.current).variables,
+          )) || '';
         break;
       }
       case 'setinput':
