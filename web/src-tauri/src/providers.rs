@@ -39,6 +39,8 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
+    #[serde(default)]
+    pub purpose: Option<String>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -362,12 +364,7 @@ pub async fn generate_chat(
 ) -> Result<Completion, String> {
     let raw = crate::load_app_settings().await?;
     let settings: Value = serde_json::from_str(&raw).map_err(|_| "AI 配置损坏".to_string())?;
-    let providers: Vec<Provider> = serde_json::from_value(settings["providers"].clone())
-        .map_err(|_| "请先在设置中保存 AI 提供商".to_string())?;
-    let provider = providers
-        .into_iter()
-        .find(|p| p.id == request.provider_id)
-        .ok_or("所选提供商不存在，请重新保存设置")?;
+    let provider = provider_for_request(&settings, &request)?;
     let notify = Arc::new(Notify::new());
     {
         let mut map = requests().lock().await;
@@ -379,6 +376,32 @@ pub async fn generate_chat(
     let result = tokio::select! {result=stream(&provider,&request,|delta|{let _=on_event.send(GenerationEvent{request_id:request.request_id.clone(),delta});})=>result,_=notify.notified()=>Err("生成已取消".into())};
     requests().lock().await.remove(&request.request_id);
     result
+}
+fn provider_for_request(settings: &Value, request: &ChatRequest) -> Result<Provider, String> {
+    let providers: Vec<Provider> = serde_json::from_value(settings["providers"].clone())
+        .map_err(|_| "请先在设置中保存 AI 提供商".to_string())?;
+    let mut provider = providers
+        .into_iter()
+        .find(|p| p.id == request.provider_id)
+        .ok_or("所选提供商不存在，请重新保存设置")?;
+    if let Some(purpose) = &request.purpose {
+        if purpose != "memory" {
+            return Err("未知模型请求用途".into());
+        }
+        if settings["memory"]["enabled"].as_bool() != Some(true) {
+            return Err("请先在设置中启用自动记忆并保存".into());
+        }
+        let selected = settings["memory"]["providerId"].as_str()
+            .filter(|s| !s.is_empty())
+            .or_else(|| settings["activeProviderId"].as_str());
+        if selected != Some(provider.id.as_str()) {
+            return Err("记忆连接已变更，请重新整理".into());
+        }
+        // Summaries need bounded JSON, not thousands of reasoning tokens from
+        // the foreground roleplay model's settings.
+        provider.thinking_level = "off".into();
+    }
+    Ok(provider)
 }
 #[tauri::command]
 pub async fn cancel_generation(request_id: String) -> Result<bool, String> {
@@ -460,6 +483,7 @@ mod tests {
             max_tokens: Some(128),
             temperature: None,
             top_p: None,
+            purpose: None,
         }
     }
     #[tokio::test]
@@ -544,6 +568,46 @@ mod tests {
             safe_error("secret failed".into(), "secret"),
             "[REDACTED] failed"
         );
+    }
+    #[test]
+    fn memory_purpose_is_opt_in_and_does_not_change_foreground_settings() {
+        let settings = json!({
+            "activeProviderId":"test", "providers":[{
+                "id":"test","baseUrl":"http://127.0.0.1:1/v1","model":"model",
+                "responseFormat":"openai","thinkingLevel":"high","apiKey":"secret"
+            }],
+            "memory":{"enabled":true,"providerId":"test"}
+        });
+        let mut r = request();
+        assert_eq!(provider_for_request(&settings, &r).unwrap().thinking_level, "high");
+        r.purpose = Some("memory".into());
+        assert_eq!(provider_for_request(&settings, &r).unwrap().thinking_level, "off");
+        assert_eq!(settings["providers"][0]["thinkingLevel"], "high");
+        let mut disabled = settings.clone();
+        disabled["memory"]["enabled"] = json!(false);
+        assert!(provider_for_request(&disabled, &r).is_err());
+        disabled["memory"] = Value::Null;
+        assert!(provider_for_request(&disabled, &r).is_err());
+        let mut wrong = settings.clone();
+        wrong["memory"]["providerId"] = json!("different");
+        assert!(provider_for_request(&wrong, &r).is_err());
+        wrong["memory"]["providerId"] = json!("");
+        assert!(provider_for_request(&wrong, &r).is_ok());
+        r.purpose = Some("arbitrary".into());
+        assert!(provider_for_request(&settings, &r).is_err());
+    }
+    #[test]
+    fn memory_request_uses_existing_three_protocols_without_changing_messages() {
+        let summary = r#"{"summary":"用户与角色的故事","facts":[],"events":[],"openThreads":[]}"#;
+        for protocol in ["openai", "claude", "gemini"] {
+            let mut r = request();
+            r.purpose = Some("memory".into());
+            r.max_tokens = Some(4096);
+            r.messages[1].content = summary.into();
+            let (_, body) = protocol_request(&provider(protocol), &r).unwrap();
+            assert!(body.to_string().contains("用户与角色的故事"));
+            assert_eq!(r.messages[1].content, summary);
+        }
     }
     #[tokio::test]
     async fn real_http_stream_fragmentation_and_auth() {

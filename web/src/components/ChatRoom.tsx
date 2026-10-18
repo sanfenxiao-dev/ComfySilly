@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import type { CharacterCardData, ChatSession, ChatMessage } from './CharacterShelf';
 import type { AppSettings } from './SettingsModal';
-import { personaOf, preferencesOf } from '../types/settings';
+import { memoryOf, personaOf, preferencesOf } from '../types/settings';
 import { Avatar } from './Avatar';
 import { ConfirmDialog, Dialog } from './Dialog';
 import { MessageContent } from './MessageContent';
@@ -40,10 +40,13 @@ import {
 import type { DisplayRule } from '../utils/messagePresentation';
 import { extractRegexRulesFromPreset } from '../utils/presetImporter';
 import type { SillyPresetJson } from '../utils/presetImporter';
-import { compilePrompt } from '../utils/promptCompiler';
+import { compilePrompt, generationBudget } from '../utils/promptCompiler';
 import { cardTrustKey, readCardTrust, writeCardTrust } from '../utils/cardTrust';
 import type { PromptBook, PromptCompilation } from '../utils/promptCompiler';
 import { generateChat, cancelGeneration } from '../utils/generation';
+import { memoryContext } from '../utils/memory';
+import { useAutomaticMemory } from '../runtime/useAutomaticMemory';
+import { MemoryDialog } from './MemoryDialog';
 import {
   addVariant,
   chooseVariant,
@@ -105,7 +108,8 @@ export function ChatRoom({
   onOpenLorebookModal,
 }: ChatRoomProps) {
   const persona = personaOf(settings),
-    prefs = preferencesOf(settings);
+    prefs = preferencesOf(settings),
+    memoryPrefs = memoryOf(settings);
   const provider = settings?.providers.find((p) => p.id === settings.activeProviderId);
   const rules = useMemo<DisplayRule[]>(
     () => [
@@ -223,6 +227,7 @@ export function ChatRoom({
   const [sessionSearch, setSessionSearch] = useState('');
   const [greetingOpen, setGreetingOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [deleting, setDeleting] = useState<ChatSession | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
@@ -241,8 +246,10 @@ export function ChatRoom({
       if (generation.current) void cancelGeneration(generation.current.id).catch(() => {});
     };
   }, []);
-  const syncSessions = (next: ChatSession[], selected = activeRef.current) => {
-    const snapshots = next.map((s) => (s.id === selected ? checkpointSession(s) : s));
+  const syncSessions = (next: ChatSession[], selected = activeRef.current, checkpoint = true) => {
+    const snapshots = checkpoint
+      ? next.map((s) => (s.id === selected ? checkpointSession(s) : s))
+      : next;
     sessionsRef.current = snapshots;
     activeRef.current = selected;
     setSessions(snapshots);
@@ -339,10 +346,21 @@ export function ChatRoom({
       character: character.extensions?.comfysilly_variables ?? {},
       chat: sessionsRef.current.find((s) => s.id === sessionId)?.runtimeVariables?.chat ?? {},
     };
-    return compilePrompt({
+    const session = sessionsRef.current.find((s) => s.id === sessionId);
+    const context = memoryContext(
+      memoryPrefs.enabled && !session?.memoryPaused ? session?.memory : undefined,
+      character.id,
+      sessionId,
+      history,
+      memoryPrefs.recentMessages,
+    );
+    // Drop ONLY the original prefix successfully covered by a valid checkpoint.
+    // Newly added / edited / unsummarized messages must never disappear.
+    const compiled = compilePrompt({
       character,
       preset: effectivePreset,
-      history,
+      history: context.history,
+      worldbookHistory: history,
       worldbooks,
       userName: persona.name,
       personaDescription: persona.description,
@@ -352,8 +370,18 @@ export function ChatRoom({
         ...stored.character,
         ...stored.chat,
       },
-      overflowPolicy: 'trim-history',
+      memory: context.checkpoint,
+      memoryCharBudget: Math.min(
+        memoryPrefs.maxMemoryChars,
+        Math.floor(generationBudget(effectivePreset).inputBudget * 0.4),
+      ),
+      overflowPolicy: memoryPrefs.enabled && !session?.memoryPaused ? 'error' : 'trim-history',
     });
+    if (context.omitted)
+      compiled.warnings.push(
+        `自动记忆已覆盖 ${context.omitted} 条较早消息，本次使用摘要和近期原文；完整原记录未删除。`,
+      );
+    return compiled;
   };
   const updateSession = (session: ChatSession) =>
     syncSessions(
@@ -369,6 +397,19 @@ export function ChatRoom({
       setNotice(String(e));
     }
   };
+  const automaticMemory = useAutomaticMemory({
+    characterId: character.id,
+    session: current,
+    settings,
+    generating,
+    readSession: (id) => sessionsRef.current.find((s) => s.id === id),
+    saveSession: (session) =>
+      syncSessions(
+        sessionsRef.current.map((s) => (s.id === session.id ? session : s)),
+        activeRef.current,
+        false,
+      ),
+  });
   const runGeneration = async (
     sessionId: string,
     history: ChatSession['messages'],
@@ -380,6 +421,7 @@ export function ChatRoom({
       setNotice('消息已保存。请先在设置中配置并保存 AI 提供商和模型。');
       return;
     }
+    automaticMemory.cancel();
     const state = { id: crypto.randomUUID(), sessionId, partial: '' };
     generation.current = state;
     setGenerating(true);
@@ -387,14 +429,16 @@ export function ChatRoom({
     setNotice('正在编译提示词并连接模型…');
     let timer: ReturnType<typeof setTimeout> | undefined;
     let applied = false;
-    const finish = async (text: string) => {
+    const finish = async (text: string, incomplete = false) => {
       if (!text.trim() || applied) return;
       applied = true;
       const session = sessionsRef.current.find((s) => s.id === sessionId);
       if (!session) return;
       const messages = replaceId
         ? session.messages.map((m) =>
-            m.id === replaceId ? addVariant(m, text, 'generated', session.runtimeVariables) : m,
+            m.id === replaceId
+              ? { ...addVariant(m, text, 'generated', session.runtimeVariables), incomplete }
+              : m,
           )
         : [
             ...session.messages,
@@ -403,6 +447,7 @@ export function ChatRoom({
               role: 'assistant' as const,
               name: character.name,
               content: text,
+              incomplete,
               timestamp: now(),
             },
           ];
@@ -449,7 +494,7 @@ export function ChatRoom({
       );
       return result.text;
     } catch (error) {
-      await finish(state.partial).catch(() => {});
+      await finish(state.partial, true).catch(() => {});
       setNotice(
         `${String(error)}${state.partial ? '；已保留收到的部分回复。' : '；原消息已保留，可重试。'}`,
       );
@@ -723,6 +768,10 @@ export function ChatRoom({
               ))}
             </select>
           </label>
+          <button className="button button-quiet" onClick={() => setMemoryOpen(true)}>
+            <BookOpen size={15} />
+            <span>对话记忆</span>
+          </button>
           <button className="button button-quiet" onClick={onOpenLorebookModal}>
             <BookOpen size={15} />
             <span>角色世界书</span>
@@ -1169,6 +1218,18 @@ export function ChatRoom({
                     重试保存
                   </button>
                 )}
+                <button onClick={() => setMemoryOpen(true)} title={automaticMemory.status.detail}>
+                  <BookOpen size={12} />
+                  {memoryPrefs.enabled
+                    ? automaticMemory.status.phase === 'running'
+                      ? '记忆整理中…'
+                      : automaticMemory.status.phase === 'error'
+                        ? '记忆整理失败 · 查看'
+                        : current.memoryPaused
+                          ? '记忆已暂停'
+                          : '自动记忆'
+                    : '记忆未启用'}
+                </button>
                 <span className="compose-spacer" />
                 <button onClick={() => setExportOpen(true)}>
                   <Download size={12} />
@@ -1184,6 +1245,29 @@ export function ChatRoom({
           </div>
         </div>
       </div>
+      <MemoryDialog
+        open={memoryOpen}
+        onClose={() => setMemoryOpen(false)}
+        session={current}
+        characterId={character.id}
+        enabled={memoryPrefs.enabled}
+        status={automaticMemory.status}
+        onRetry={automaticMemory.retry}
+        onSave={async (memory, expectedRevision) => {
+          const session = sessionsRef.current.find((s) => s.id === current.id);
+          if (session) {
+            if (expectedRevision && session.memory?.revision !== expectedRevision)
+              throw new Error('记忆版本已更新，请重新编辑。');
+            automaticMemory.cancel();
+            await updateSession({ ...session, memory });
+          }
+        }}
+        onPause={async () => {
+          automaticMemory.cancel();
+          const session = sessionsRef.current.find((s) => s.id === current.id);
+          if (session) await updateSession({ ...session, memoryPaused: !session.memoryPaused });
+        }}
+      />
       <ConfirmDialog
         open={!!deleting}
         title="删除这段对话？"

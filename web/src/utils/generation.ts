@@ -7,6 +7,7 @@ export interface GenerationRequest {
   maxTokens?: number;
   temperature?: number;
   topP?: number;
+  purpose?: 'memory';
 }
 export interface Completion {
   text: string;

@@ -1,5 +1,7 @@
 import type { SillyPresetJson, SillyPromptItem } from './presetImporter.ts';
 import { applyDisplayRules } from './messagePresentation.ts';
+import type { MemoryContent } from './memory.ts';
+import { memoryPromptBlock } from './memory.ts';
 export interface PromptMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -33,6 +35,10 @@ export interface PromptInput {
   overflowPolicy?: 'error' | 'trim-history';
   /** Optional character budget for activated worldbook content. */
   worldbookCharBudget?: number;
+  memory?: MemoryContent;
+  memoryCharBudget?: number;
+  /** Keep worldbook matching independent of memory's recent-history window. */
+  worldbookHistory?: PromptMessage[];
 }
 export interface PromptCompilation {
   messages: PromptMessage[];
@@ -133,9 +139,10 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
   // entry to be reported as "skipped". Derive a safer default from the actual
   // input budget and let callers override it for small local models.
   const requestedWorldBudget = Number(input.worldbookCharBudget);
-  const worldBudget = Number.isFinite(requestedWorldBudget) && requestedWorldBudget > 0
-    ? Math.floor(requestedWorldBudget)
-    : Math.min(160000, Math.max(48000, Math.floor(generation.inputBudget * 1.5)));
+  const worldBudget =
+    Number.isFinite(requestedWorldBudget) && requestedWorldBudget > 0
+      ? Math.floor(requestedWorldBudget)
+      : Math.min(160000, Math.max(48000, Math.floor(generation.inputBudget * 1.5)));
   const values: Record<string, string> = {
     char: c.name,
     user: input.userName || '用户',
@@ -183,7 +190,7 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
     depth: number;
     role: PromptMessage['role'];
   }[] = [];
-  let search = history
+  let search = (input.worldbookHistory ?? history)
     .slice(-10)
     .map((m) => m.content)
     .join('\n');
@@ -230,7 +237,9 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
       // cards whose first paragraphs contain the actual setting/keywords.
       const injectedContent = content.length > remaining ? content.slice(0, remaining) : content;
       if (injectedContent.length < content.length) {
-        warnings.push(`世界书条目过长，本次截断 ${content.length - injectedContent.length} 字符：${name}`);
+        warnings.push(
+          `世界书条目过长，本次截断 ${content.length - injectedContent.length} 字符：${name}`,
+        );
       }
       activated.add(index);
       worldChars += injectedContent.length;
@@ -275,6 +284,9 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
   ];
   let hadHistory = false;
   const markers = new Set<string>();
+  const memoryBlock = input.memory
+    ? memoryPromptBlock(input.memory, input.memoryCharBudget ?? 12000)
+    : '';
   const markerValues: Record<string, string> = {
     worldInfoBefore: values.wibefore,
     charDescription: values.description,
@@ -348,6 +360,14 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
       result.unshift({ role: 'system', content: expand(values.persona) });
     if (!hadHistory) result.push(...historyCopy);
   }
+  const memoryMessage: PromptMessage | undefined = memoryBlock
+    ? { role: 'system', content: memoryBlock }
+    : undefined;
+  if (memoryMessage) {
+    const firstHistory = result.findIndex((m) => historyCopy.includes(m));
+    result.splice(firstHistory < 0 ? result.length : firstHistory, 0, memoryMessage);
+    sources.push({ name: '当前对话自动记忆', characters: memoryBlock.length });
+  }
   for (const inj of injections)
     if (inj.content.trim())
       result.splice(Math.max(0, result.length - inj.depth), 0, {
@@ -365,12 +385,10 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
   const candidatesToSend = result
     .filter((m) => m.content.trim())
     .map((m, index) => {
-      const processed = applyDisplayRules(
-        m.content,
-        promptRules,
-        m.role,
-        result.length - index - 1,
-      );
+      const processed =
+        m === memoryMessage
+          ? { text: m.content, diagnostics: [] }
+          : applyDisplayRules(m.content, promptRules, m.role, result.length - index - 1);
       warnings.push(...processed.diagnostics.map((d) => `${d.name}: ${d.error}`));
       return {
         message: { ...m, content: processed.text },

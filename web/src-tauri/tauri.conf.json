@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ComfySilly",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "identifier": "com.comfysilly.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ComfySilly 0.3.3 · 故事工作室",
+        "title": "ComfySilly 0.4.0 · 故事工作室",
         "width": 1400,
         "height": 900,
         "minWidth": 960,

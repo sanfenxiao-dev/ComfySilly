@@ -1506,3 +1506,95 @@
     max-width: 180px;
   }
 }
+
+/* Independent memory panel; no changes to the author-card runtime. */
+.memory-dialog {
+  width: min(820px, calc(100vw - 40px));
+}
+.memory-content {
+  padding: 8px 28px 28px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.memory-overview {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border, #ffffff1a);
+  border-radius: 12px;
+}
+.memory-overview span,
+.memory-overview small {
+  opacity: 0.7;
+}
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+.memory-content section {
+  margin: 24px 0;
+}
+.memory-content h3 {
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+.memory-summary {
+  white-space: pre-wrap;
+  line-height: 1.9;
+  font-size: 14px;
+}
+.memory-items {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.memory-items li {
+  border-bottom: 1px solid var(--border, #ffffff1a);
+  padding-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.memory-items p {
+  white-space: pre-wrap;
+  margin: 0;
+}
+.memory-source {
+  border: 0;
+  color: inherit;
+  opacity: 0.65;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 8px 4px 0;
+}
+.memory-source:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+.memory-source-message {
+  padding: 24px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.memory-item-editor {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: start;
+}
+.memory-item-editor textarea {
+  flex: 1;
+}
+.memory-empty {
+  padding: 32px 8px;
+  opacity: 0.65;
+  line-height: 1.8;
+}

@@ -1,7 +1,7 @@
 {
   "name": "web",
   "private": true,
-  "version": "0.3.3",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/build-runtime.mjs && vite",
@@ -14,7 +14,8 @@
     "test:studio": "node tests/studio.smoke.mjs",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
-    "test:history": "node tests/history.smoke.mjs"
+    "test:history": "node tests/history.smoke.mjs",
+    "test:memory": "node tests/memory.smoke.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

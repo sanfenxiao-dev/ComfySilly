@@ -27,11 +27,15 @@ try {
  await page.waitForFunction(()=>window.fixtureState.requests.length===2);
  req=await page.evaluate(()=>window.fixtureState.requests.at(-1));assert.equal(req.maxTokens,2048);assert.ok(req.messages.some(m=>m.content.includes('PRESET_B_MARKER')));assert.ok(!req.messages.some(m=>m.content.includes('PRESET_A_MARKER')));
  await page.getByRole('button',{name:'发送消息',exact:true}).waitFor();
- await page.getByRole('button',{name:'生成参数',exact:true}).click();
- await page.getByRole('spinbutton',{name:'上下文窗口',exact:true}).fill('131072');await page.getByRole('spinbutton',{name:'最大回复 tokens',exact:true}).fill('3072');await page.getByRole('button',{name:'保存生成参数'}).click();
+ // These duplicate chat controls were intentionally removed before 0.3.3.
+ assert.equal(await page.getByRole('button',{name:'生成参数',exact:true}).count(),0);
+ // Legacy saved budget overrides must still be readable after migration.
+ await page.evaluate(()=>localStorage.setItem('comfysilly:generation-budgets',JSON.stringify({'fixture-preset-b':{contextWindow:131072,maxOutputTokens:3072}})));
  await page.reload();await page.getByRole('button',{name:'角色与对话',exact:true}).click();await page.getByRole('button',{name:'打开角色 雨后的书店'}).click();await page.getByRole('button',{name:'继续上次对话'}).click();
  assert.equal(await page.getByRole('combobox',{name:'当前对话预设'}).inputValue(),'fixture-preset-b');
- await page.getByRole('button',{name:'生成参数',exact:true}).click();assert.equal(await page.getByRole('spinbutton',{name:'上下文窗口',exact:true}).inputValue(),'131072');assert.equal(await page.getByRole('spinbutton',{name:'最大回复 tokens',exact:true}).inputValue(),'3072');
+ await page.getByRole('textbox',{name:'对话输入'}).fill('旧预算迁移测试');await page.getByRole('button',{name:'发送消息',exact:true}).click();
+ await page.waitForFunction(()=>window.fixtureState.requests.length===1);
+ assert.equal(await page.evaluate(()=>window.fixtureState.requests[0].maxTokens),3072);
  report.checks.push('chat preset switch affects real compiled request; invalid imported output repaired; selected preset and generation overrides survive reload');
  let card={id:'trust-fixture',name:'信任测试',first_mes:'```html\n<body><button onclick="this.textContent=\'已点击\'">作者按钮</button></body>\n```',extensions:{},sessions:[]};
  await page.route('**/__test__/card.json',r=>r.fulfill({json:card}));await page.goto(origin+'tests/chat-harness.html');

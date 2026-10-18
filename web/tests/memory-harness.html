@@ -1,0 +1,45 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><div id="root" style="height:100vh"></div>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { ChatRoom } from '/src/components/ChatRoom.tsx';
+import { SettingsModal } from '/src/components/SettingsModal.tsx';
+import '/src/index.css';
+const card = await fetch('/__test__/memory-card.json').then(r => r.json());
+window.savedCharacters=[]; window.requests=[]; window.cancelled=[];
+window.invalidMemory=false; window.memoryDelay=20;
+const provider = id => ({ id, name: id, model: 'fixture-'+id, baseUrl:'http://127.0.0.1:1/v1',
+  apiKey:'TEST_ONLY_KEY', responseFormat:'openai', thinkingLevel:'off', temperature:0.5 });
+const settings={activeProviderId:'chat',providers:[provider('chat'),provider('mem')],
+  memory:{enabled:true,providerId:'mem',triggerEveryTurns:1,recentMessages:6,batchChars:4000,maxMemoryChars:12000}};
+window.__TAURI_INTERNALS__={transformCallback:()=>1,unregisterCallback:()=>{},invoke:async(cmd,args)=>{
+  if(cmd==='cancel_generation'){window.cancelled.push(args.requestId); return true;}
+  if(cmd==='generate_chat') {
+    const r=args.request; window.requests.push(structuredClone(r));
+    if(r.purpose==='memory') {
+      const data=JSON.parse(r.messages[1].content);
+      await new Promise(resolve=>setTimeout(resolve,window.memoryDelay));
+      if(window.invalidMemory) return {text:'not-json'};
+      const fact=data.oldMemory.facts[0] ?? {content:data.newMessages[0].content.slice(0,70),sourceMessageIds:[data.newMessages[0].id]};
+      return {text:JSON.stringify({summary:'本对话故事摘要：'+fact.content,facts:[fact],events:[],openThreads:[]})};
+    }
+    const text='仅属于当前对话的测试回复';
+    args.onEvent.onmessage({requestId:r.requestId,delta:text});
+    return {text,usage:{completion_tokens:12}};
+  }
+  throw Error('Unexpected IPC '+cmd);
+}};
+function Harness(){
+  const [current,setCurrent]=React.useState(card);
+  const [config,setConfig]=React.useState(settings);
+  const [open,setOpen]=React.useState(false);
+  window.fixtureSettings=config;
+  return React.createElement(React.Fragment,null,
+    React.createElement('button',{onClick:()=>setOpen(true),style:{position:'fixed',zIndex:5000,right:8,bottom:4}},'测试打开设置'),
+    React.createElement(SettingsModal,{isOpen:open,onClose:()=>setOpen(false),initialSection:'memory',initialSettings:config,
+      onSave:async next=>{setConfig(next);setOpen(false);}}),
+    React.createElement(ChatRoom,{character:current,settings:config,onBackToShelf:()=>{},onOpenLorebookModal:()=>{},
+      onUpdateCharacterSessions:async updated=>{setCurrent(updated);window.savedCharacters.push(structuredClone(updated));}}));
+}
+createRoot(document.getElementById('root')).render(React.createElement(Harness));
+</script></html>

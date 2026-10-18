@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatSession, MessageVariant } from '../components/CharacterShelf.tsx';
+import { forkMemory } from './memory.ts';
 const copy = <T>(value: T): T => structuredClone(value);
 export function variantsOf(message: ChatMessage): MessageVariant[] {
   const variants = copy(message.variants ?? []);
@@ -52,13 +53,18 @@ export function forkSession(session: ChatSession, index: number): ChatSession {
   for (const key of Object.keys(variables))
     if (key.startsWith('message:') && Number(key.slice(8)) > index) delete variables[key];
   const ids = new Set(messages.map((m) => m.id));
+  const branchId = crypto.randomUUID();
   return {
-    id: crypto.randomUUID(),
+    id: branchId,
     title: `${session.title.replace(/ · 分支.*$/, '')} · 分支 ${index + 1}`,
     updatedAt: new Date().toISOString(),
     parentSessionId: session.id,
     forkedFromMessageId: messages.at(-1)!.id,
     messages,
+    memory: session.memory
+      ? forkMemory(session.memory, session.memory.characterId, branchId, messages)
+      : undefined,
+    memoryPaused: session.memoryPaused,
     runtimeVariables: variables,
     runtimeCheckpoints: copy(
       Object.fromEntries(

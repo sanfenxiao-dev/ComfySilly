@@ -24,12 +24,22 @@ export interface Preferences {
   autoScroll: boolean;
   sendKey: 'enter' | 'ctrl-enter';
 }
+export interface MemorySettings {
+  enabled: boolean;
+  providerId: string;
+  triggerEveryTurns: number;
+  recentMessages: number;
+  maxMemoryChars: number;
+  batchChars: number;
+  maxOutputTokens: number;
+}
 export interface AppSettings {
   activeProviderId: string;
   providers: ProviderConfig[];
   personas?: Persona[];
   activePersonaId?: string;
   preferences?: Partial<Preferences>;
+  memory?: Partial<MemorySettings>;
   [key: string]: unknown;
 }
 export const defaultPreferences: Preferences = {
@@ -43,6 +53,15 @@ export const defaultPreferences: Preferences = {
   sendKey: 'enter',
 };
 export const defaultPersona: Persona = { id: 'user-default', name: '用户', description: '' };
+export const defaultMemorySettings: MemorySettings = {
+  enabled: false,
+  providerId: '',
+  triggerEveryTurns: 1,
+  recentMessages: 12,
+  maxMemoryChars: 12000,
+  batchChars: 16000,
+  maxOutputTokens: 4096,
+};
 export const providerTemplates: ProviderConfig[] = [
   {
     id: 'openai-default',
@@ -117,6 +136,22 @@ export function personaOf(settings?: AppSettings): Persona {
   const list = personasOf(settings);
   return list.find((p) => p.id === settings?.activePersonaId) ?? list[0];
 }
+export function memoryOf(settings?: AppSettings): MemorySettings {
+  const raw = { ...defaultMemorySettings, ...settings?.memory };
+  return {
+    enabled: raw.enabled === true,
+    providerId: typeof raw.providerId === 'string' ? raw.providerId : '',
+    triggerEveryTurns: bounded(raw.triggerEveryTurns, 1, 10, 1),
+    recentMessages: bounded(raw.recentMessages, 6, 30, 12),
+    maxMemoryChars: bounded(raw.maxMemoryChars, 1000, 20000, 12000),
+    batchChars: bounded(raw.batchChars, 4000, 40000, 16000),
+    maxOutputTokens: bounded(raw.maxOutputTokens, 2048, 8192, 4096),
+  };
+}
+function bounded(value: unknown, min: number, max: number, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.floor(Math.max(min, Math.min(max, n))) : fallback;
+}
 export function normalizeSettings(settings?: AppSettings): AppSettings {
   const valid = Array.isArray(settings?.providers)
     ? settings.providers.filter((p) => p && typeof p.id === 'string')
@@ -134,6 +169,7 @@ export function normalizeSettings(settings?: AppSettings): AppSettings {
     personas,
     activePersonaId: personaOf(settings).id,
     preferences: preferencesOf(settings),
+    memory: memoryOf(settings),
   };
 }
 export function applyPreferences(p: Preferences) {

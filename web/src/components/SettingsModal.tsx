@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useRef, useState } from 'react';
 import {
   Server,
+  BookOpen,
   Palette,
   MessagesSquare,
   UserRound,
@@ -22,10 +23,12 @@ import {
   personasOf,
   providerTemplates,
   readAvatar,
+  memoryOf,
 } from '../types/settings';
-import type { AppSettings, ProviderConfig, Preferences } from '../types/settings';
+import type { AppSettings, ProviderConfig, Preferences, MemorySettings } from '../types/settings';
 export type { AppSettings, ProviderConfig } from '../types/settings';
-export type SettingsSection = 'models' | 'appearance' | 'conversation' | 'personas' | 'about';
+export type SettingsSection =
+  'models' | 'appearance' | 'conversation' | 'memory' | 'personas' | 'about';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -38,6 +41,7 @@ const sections = [
   { id: 'models', label: '模型与连接', icon: Server },
   { id: 'appearance', label: '外观与动效', icon: Palette },
   { id: 'conversation', label: '对话偏好', icon: MessagesSquare },
+  { id: 'memory', label: '自动记忆', icon: BookOpen },
   { id: 'personas', label: '用户身份', icon: UserRound },
   { id: 'about', label: '数据与关于', icon: Info },
 ] as const;
@@ -73,6 +77,7 @@ export function SettingsModal({
   }, [isOpen, initialSettings, initialSection]);
   const prefs = preferencesOf(draft),
     persona = personaOf(draft),
+    memory = memoryOf(draft),
     providers = draft.providers,
     provider = providers.find((p) => p.id === selected) ?? providers[0];
   const patchProvider = (patch: Partial<ProviderConfig>) =>
@@ -90,6 +95,8 @@ export function SettingsModal({
       ...s,
       personas: personasOf(s).map((p) => (p.id === persona.id ? { ...p, ...patch } : p)),
     }));
+  const patchMemory = (patch: Partial<MemorySettings>) =>
+    setDraft((s) => ({ ...s, memory: { ...memoryOf(s), ...patch } }));
   const close = () => {
     onPreviewPreferences?.(null);
     onClose();
@@ -445,6 +452,118 @@ export function SettingsModal({
               </div>
             </>
           )}
+          {section === 'memory' && (
+            <>
+              <div className="settings-section">
+                <h3>自动记忆</h3>
+                <p>
+                  只使用你配置的语言模型在后台整理当前对话，不使用向量数据库或远程记忆服务。
+                  每个角色卡的每个对话各自保存，切换角色和对话不会串记忆。
+                </p>
+                <div className="settings-row">
+                  <div>
+                    <strong>启用自动记忆</strong>
+                    <p>回复完成后异步更新剧情摘要、事实、事件和未完成事项。</p>
+                  </div>
+                  <button
+                    className="switch"
+                    role="switch"
+                    aria-checked={memory.enabled}
+                    aria-label="启用自动记忆"
+                    onClick={() => patchMemory({ enabled: !memory.enabled })}
+                  />
+                </div>
+                <label className="field">
+                  记忆使用的连接
+                  <select
+                    className="text-input"
+                    value={memory.providerId}
+                    onChange={(e) => patchMemory({ providerId: e.target.value })}
+                  >
+                    <option value="">跟随当前聊天连接</option>
+                    {providers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.model || '未配置模型'}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="field-hint">
+                    启用后会产生额外模型调用与费用；仅发送本对话的已有记忆和待整理消息。新连接请在“模型与连接”中添加。
+                  </span>
+                </label>
+                <div className="field-grid">
+                  <label className="field">
+                    每隔几轮整理
+                    <input
+                      className="text-input"
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={memory.triggerEveryTurns}
+                      onChange={(e) => patchMemory({ triggerEveryTurns: Number(e.target.value) })}
+                    />
+                  </label>
+                  <label className="field">
+                    保留最近消息数
+                    <input
+                      className="text-input"
+                      type="number"
+                      min="6"
+                      max="30"
+                      value={memory.recentMessages}
+                      onChange={(e) => patchMemory({ recentMessages: Number(e.target.value) })}
+                    />
+                  </label>
+                </div>
+                <label className="field">
+                  记忆注入上限 · {memory.maxMemoryChars} 字符
+                  <input
+                    type="range"
+                    min="1000"
+                    max="20000"
+                    step="1000"
+                    value={memory.maxMemoryChars}
+                    onChange={(e) => patchMemory({ maxMemoryChars: Number(e.target.value) })}
+                  />
+                </label>
+                <div className="field-grid">
+                  <label className="field">
+                    每批读取字符数
+                    <input
+                      className="text-input"
+                      type="number"
+                      min="4000"
+                      max="40000"
+                      step="1000"
+                      value={memory.batchChars}
+                      onChange={(e) => patchMemory({ batchChars: Number(e.target.value) })}
+                    />
+                    <span className="field-hint">
+                      长历史按顺序分批，超长单条消息也会续读，不直接截断丢弃。
+                    </span>
+                  </label>
+                  <label className="field">
+                    整理输出 token 上限
+                    <input
+                      className="text-input"
+                      type="number"
+                      min="2048"
+                      max="8192"
+                      step="512"
+                      value={memory.maxOutputTokens}
+                      onChange={(e) => patchMemory({ maxOutputTokens: Number(e.target.value) })}
+                    />
+                    <span className="field-hint">
+                      小上下文模型请减小每批输入；JSON被截断时可增加此值。
+                    </span>
+                  </label>
+                </div>
+                <div className="inline-note">
+                  原始聊天不删除；未整理成功的消息不会被记忆窗口裁掉。分支只继承分叉位置之前有效的快照，不带入未来剧情。后台失败最多重试两次，可在对话记忆面板查看和重试。
+                </div>
+              </div>
+            </>
+          )}
           {section === 'personas' && (
             <>
               <div className="settings-section">
@@ -543,7 +662,7 @@ export function SettingsModal({
               <div className="settings-section">
                 <span className="eyebrow">COMFYSILLY / STUDIO</span>
                 <h3>一个安静的故事工作室</h3>
-                <p>0.3.3 · Windows 桌面版 · Rust / Tauri</p>
+                <p>0.4.0 · Windows 桌面版 · Rust / Tauri</p>
                 <div className="settings-rule" />
                 <h3>你的数据留在本机</h3>
                 <p>
@@ -583,6 +702,18 @@ export function SettingsModal({
             setError('');
             if (personasOf(draft).some((p) => !p.name.trim())) {
               setError('身份名字不能为空');
+              return;
+            }
+            const memoryConfig = memoryOf(draft);
+            const memoryModel = draft.providers.find(
+              (p) => p.id === (memoryConfig.providerId || draft.activeProviderId),
+            )?.model;
+            if (
+              memoryConfig.enabled &&
+              (typeof memoryModel !== 'string' || !memoryModel.trim())
+            ) {
+              setError('请先为自动记忆选择已配置模型的连接，或暂时关闭自动记忆。');
+              setSection('memory');
               return;
             }
             setSaving(true);

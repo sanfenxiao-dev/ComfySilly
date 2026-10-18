@@ -81,7 +81,8 @@ export function useCardRuntime(options: Options) {
   latest.current = options;
   const snapshotCache = useRef<{
     character: CharacterCardData;
-    session: ChatSession;
+    messages: ChatSession['messages'];
+    runtimeVariables: ChatSession['runtimeVariables'];
     presetKey?: string;
     userName?: string;
     value: RuntimeSnapshot;
@@ -91,7 +92,8 @@ export function useCardRuntime(options: Options) {
     if (
       cached &&
       cached.character === input.character &&
-      cached.session === input.session &&
+      cached.messages === input.session.messages &&
+      cached.runtimeVariables === input.session.runtimeVariables &&
       cached.presetKey === input.presetKey &&
       cached.userName === input.userName
     ) {
@@ -100,7 +102,8 @@ export function useCardRuntime(options: Options) {
     const value = snapshot(input);
     snapshotCache.current = {
       character: input.character,
-      session: input.session,
+      messages: input.session.messages,
+      runtimeVariables: input.session.runtimeVariables,
       presetKey: input.presetKey,
       userName: input.userName,
       value,
@@ -134,15 +137,13 @@ export function useCardRuntime(options: Options) {
         .filter((key) => key !== 'comfysilly_variables')
         .every(
           (key) =>
-            (previousCharacter.extensions ?? {})[key] ===
-            (options.character.extensions ?? {})[key],
+            (previousCharacter.extensions ?? {})[key] === (options.character.extensions ?? {})[key],
         ) &&
       Object.keys(options.character.extensions ?? {})
         .filter((key) => key !== 'comfysilly_variables')
         .every(
           (key) =>
-            (previousCharacter.extensions ?? {})[key] ===
-            (options.character.extensions ?? {})[key],
+            (previousCharacter.extensions ?? {})[key] === (options.character.extensions ?? {})[key],
         );
 
     // Variable writes are frequent in author UI cards. Do not rebroadcast the
@@ -158,7 +159,21 @@ export function useCardRuntime(options: Options) {
       bridge.update(next);
     }
     lastCharacter.current = options.character;
-  }, [bridge, options.character, options.session, options.presetKey, options.userName]);
+    // Session-only memory revisions must not rebroadcast or reload card frames.
+  }, [
+    bridge,
+    options.character.id,
+    options.character.name,
+    options.character.description,
+    options.character.lorebook?.name,
+    options.character.extensions?.comfysilly_variables,
+    options.character.extensions?.regex_scripts,
+    options.session.id,
+    options.session.messages,
+    options.session.runtimeVariables,
+    options.presetKey,
+    options.userName,
+  ]);
   bridge.onNotice = (text) => latest.current.notice(text);
   bridge.onCall = async (method, args) => {
     const o = latest.current;
@@ -217,7 +232,9 @@ export function useCardRuntime(options: Options) {
           // atomically rewritten. The in-memory snapshot is already updated above.
           void updateCharacter({
             extensions: { ...o.character.extensions, comfysilly_variables: value },
-          }).catch((error) => latest.current.notice(`角色变量已更新到当前会话，但保存卡片失败：${String(error)}`));
+          }).catch((error) =>
+            latest.current.notice(`角色变量已更新到当前会话，但保存卡片失败：${String(error)}`),
+          );
         } else {
           const current = latest.current;
           const vars = { ...current.session.runtimeVariables, [key]: value };
@@ -345,7 +362,11 @@ export function useCardRuntime(options: Options) {
           await persistMessages(messages);
           return await o.generate(o.session.id, messages, readSnapshot(latest.current).variables);
         }
-        return await o.generate(o.session.id, o.session.messages, readSnapshot(latest.current).variables);
+        return await o.generate(
+          o.session.id,
+          o.session.messages,
+          readSnapshot(latest.current).variables,
+        );
       }
       case 'triggerSlash':
         return await slash(String(args[0]), bridge, latest);

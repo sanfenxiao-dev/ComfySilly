@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { CSSProperties, MouseEvent } from 'react';
 import { BookOpen, Plus, Upload, Trash2, MessageSquare, Search, ArrowUpRight } from 'lucide-react';
 import { ConfirmDialog } from './Dialog';
+import type { ConversationMemory } from '../utils/memory';
 export interface MessageVariant {
   id: string;
   content: string;
@@ -19,6 +20,7 @@ export interface ChatMessage {
   personaId?: string;
   variants?: MessageVariant[];
   selectedVariant?: number;
+  incomplete?: boolean;
 }
 export interface ChatSession {
   id: string;
@@ -28,6 +30,9 @@ export interface ChatSession {
   forkedFromMessageId?: string;
   runtimeVariables?: Record<string, Record<string, unknown>>;
   runtimeCheckpoints?: Record<string, Record<string, Record<string, unknown>>>;
+  /** Long-term memory is intentionally scoped to this exact chat session. */
+  memory?: ConversationMemory;
+  memoryPaused?: boolean;
   messages: ChatMessage[];
 }
 
