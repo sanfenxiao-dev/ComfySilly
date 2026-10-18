@@ -390,6 +390,7 @@ export function ChatRoom({
           name: 'message_swiped',
           index: messages.findIndex((m) => m.id === replaceId),
         };
+      setNotice('正在保存回复…');
       await updateSession({ ...session, messages, updatedAt: now() });
     };
     try {

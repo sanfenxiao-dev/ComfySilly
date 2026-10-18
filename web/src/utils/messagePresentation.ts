@@ -91,6 +91,9 @@ function isLikelyHtmlFragment(text: string) {
   // so ordinary prose containing "<content>" is not turned into executable HTML.
   return /<\/?(?:details|summary|button|div|section|main|article|form|input|textarea|select|option|label|table|ul|ol|li|iframe)\b[^>]*>/i.test(trimmed);
 }
+
+const fragmentStartTag =
+  /<(?:details|summary|button|div|section|main|article|form|input|textarea|select|option|label|table|ul|ol|li|iframe)\b[^>]*>/i;
 /** Recognize fenced HTML without leaking the fences into the HTML document. */
 export function splitMessageParts(text: string): MessagePart[] {
   const parts: MessagePart[] = [];
@@ -108,7 +111,21 @@ export function splitMessageParts(text: string): MessagePart[] {
   const tail = text.slice(last);
   if (tail.trim()) {
     const fullDocument = /^\s*(?:<!doctype\s+html[^>]*>\s*)?<(?:html|body)\b/i.test(tail);
-    parts.push({ kind: fullDocument || isLikelyHtmlFragment(tail) ? 'html' : 'text', content: tail });
+    const fragment = fragmentStartTag.exec(tail);
+    if (fragment && isLikelyHtmlFragment(tail.slice(fragment.index))) {
+      // A previous regex may have removed the opening wrapper, leaving a closing
+      // tag immediately before the next interactive block. Keep that closing tag
+      // in the same iframe instead of leaking it as visible Markdown.
+      const closing = tail
+        .slice(0, fragment.index)
+        .match(/(?:<\/?(?:details|summary|div|section|main|article|form|ul|ol|li)\b[^>]*>\s*)+$/i);
+      const start = closing ? fragment.index - closing[0].length : fragment.index;
+      const before = tail.slice(0, start);
+      if (before.trim()) parts.push({ kind: 'text', content: before });
+      parts.push({ kind: 'html', content: tail.slice(start).trim() });
+    } else {
+      parts.push({ kind: fullDocument || isLikelyHtmlFragment(tail) ? 'html' : 'text', content: tail });
+    }
   }
   return parts;
 }

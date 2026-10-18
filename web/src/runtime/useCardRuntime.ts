@@ -126,9 +126,13 @@ export function useCardRuntime(options: Options) {
             JSON.stringify(value),
           );
         } else if (key === 'character') {
-          await updateCharacter({
+          // Character cards can be several megabytes and third-party buttons often
+          // call this from a synchronous UI handler. Persist in the background so
+          // the iframe RPC does not hit its 10s timeout while the card file is being
+          // atomically rewritten. The in-memory snapshot is already updated above.
+          void updateCharacter({
             extensions: { ...o.character.extensions, comfysilly_variables: value },
-          });
+          }).catch((error) => latest.current.notice(`角色变量已更新到当前会话，但保存卡片失败：${String(error)}`));
         } else {
           const current = latest.current;
           const vars = { ...current.session.runtimeVariables, [key]: value };

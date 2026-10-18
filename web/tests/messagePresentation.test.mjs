@@ -24,6 +24,11 @@ test('raw interactive fragments are mounted instead of escaped as Markdown', () 
   const raw = '</details><div class="choices"><button data-choice="1">继续</button></div>';
   assert.deepEqual(splitMessageParts(raw), [{ kind: 'html', content: raw }]);
 });
+test('mixed prose followed by an un-fenced details block keeps the prose and mounts the block', () => {
+  const result = splitMessageParts('正文说明\n</div></details><details><summary>状态</summary><button>继续</button></details>');
+  assert.deepEqual(result.map((part) => part.kind), ['text', 'html']);
+  assert.match(result[1].content, /<button>继续<\/button>/);
+});
 test('display rules respect disabled, prompt-only and message role', () => {
   const rules = [
     { findRegex: 'a', replaceString: 'bad', disabled: true },
