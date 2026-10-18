@@ -17,6 +17,37 @@ export interface RuleDiagnostic {
   error: string;
 }
 
+// Message rows are rendered more than once while a chat, iframe, or prompt
+// preview updates. Keep the expensive regex pass out of those repeated renders.
+// This is deliberately a small bounded cache: messages can contain untrusted
+// card output and we must not retain an unbounded chat transcript in memory.
+const displayCache = new Map<string, { text: string; diagnostics: RuleDiagnostic[] }>();
+const partsCache = new Map<string, MessagePart[]>();
+const rulesKeys = new WeakMap<object, string>();
+const MAX_PRESENTATION_CACHE = 256;
+
+function cacheKeyForRules(rules: DisplayRule[]) {
+  if (rules && typeof rules === 'object') {
+    const cached = rulesKeys.get(rules);
+    if (cached) return cached;
+    let key = '';
+    try {
+      key = JSON.stringify(rules);
+    } catch {
+      key = String(rules.length);
+    }
+    rulesKeys.set(rules, key);
+    return key;
+  }
+  return '';
+}
+
+function remember<T>(cache: Map<string, T>, key: string, value: T) {
+  cache.set(key, value);
+  if (cache.size > MAX_PRESENTATION_CACHE) cache.delete(cache.keys().next().value as string);
+  return value;
+}
+
 /** Display processing must never overwrite the persisted original message. */
 export function applyDisplayRules(
   content: string,
@@ -24,6 +55,9 @@ export function applyDisplayRules(
   role = 'assistant',
   depth = 0,
 ) {
+  const key = `${role}|${depth}|${cacheKeyForRules(rules)}|${content}`;
+  const cached = displayCache.get(key);
+  if (cached) return cached;
   let text = content;
   const diagnostics: RuleDiagnostic[] = [];
   for (const [index, rule] of rules.entries()) {
@@ -90,7 +124,7 @@ export function applyDisplayRules(
       });
     }
   }
-  return { text, diagnostics };
+  return remember(displayCache, key, { text, diagnostics });
 }
 
 const htmlTag =
@@ -111,6 +145,8 @@ const interactiveTagAnywhere =
   /<(?:details|summary|button|div|section|main|article|form|input|textarea|select|option|label|table|ul|ol|li|iframe)\b/i;
 /** Recognize fenced HTML without leaking the fences into the HTML document. */
 export function splitMessageParts(text: string): MessagePart[] {
+  const cached = partsCache.get(text);
+  if (cached) return cached;
   const parts: MessagePart[] = [];
   const fences =
     /(^|\n)([ \t]*)(`{3,}|~{3,})([^\r\n]*)\r?\n([\s\S]*?)\r?\n[ \t]*\3[ \t]*(?=\r?\n|$)/g;
@@ -144,7 +180,7 @@ export function splitMessageParts(text: string): MessagePart[] {
       parts.push({ kind: fullDocument || isLikelyHtmlFragment(tail) ? 'html' : 'text', content: tail });
     }
   }
-  return parts;
+  return remember(partsCache, text, parts);
 }
 
 export function inspectFrontend(html: string) {

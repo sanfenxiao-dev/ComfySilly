@@ -176,3 +176,22 @@ test('unsupported worldbook positions are reported instead of silently injected 
     false,
   );
 });
+
+test('oversized worldbook entries are truncated instead of hiding the whole book', () => {
+  const out = compilePrompt({
+    character: { name: 'x' },
+    history: [{ role: 'user', content: 'hi' }],
+    worldbookCharBudget: 20,
+    worldbooks: [
+      {
+        name: '大书',
+        enabled: true,
+        data: { entries: [{ constant: true, content: '一二三四五六七八九十ABCDEFGHIJKLMN' }] },
+      },
+    ],
+  });
+  const text = out.messages.map((m) => m.content).join('\n');
+  assert.match(text, /一二三四五六七八九十/);
+  assert.ok(out.warnings.some((warning) => warning.includes('条目过长') && warning.includes('截断')));
+  assert.ok(!out.warnings.some((warning) => warning.includes('跳过')));
+});

@@ -31,6 +31,8 @@ export interface PromptInput {
   personaDescription?: string;
   variables?: Record<string, unknown>;
   overflowPolicy?: 'error' | 'trim-history';
+  /** Optional character budget for activated worldbook content. */
+  worldbookCharBudget?: number;
 }
 export interface PromptCompilation {
   messages: PromptMessage[];
@@ -125,6 +127,15 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
   const p = preset ?? {};
   const warnings: string[] = [];
   const sources: PromptCompilation['sources'] = [];
+  const generation = generationBudget(p);
+  // Worldbooks are intentionally bounded, but a fixed 48k ceiling made large
+  // books look completely broken: one oversized entry could cause every later
+  // entry to be reported as "skipped". Derive a safer default from the actual
+  // input budget and let callers override it for small local models.
+  const requestedWorldBudget = Number(input.worldbookCharBudget);
+  const worldBudget = Number.isFinite(requestedWorldBudget) && requestedWorldBudget > 0
+    ? Math.floor(requestedWorldBudget)
+    : Math.min(160000, Math.max(48000, Math.floor(generation.inputBudget * 1.5)));
   const values: Record<string, string> = {
     char: c.name,
     user: input.userName || '用户',
@@ -209,14 +220,22 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
               ? !secondaryHit
               : secondary.every(match));
       if (e.constant !== true && !(primaryHit && secondaryPass)) continue;
-      if (worldChars + content.length > 48000) {
-        warnings.push(`世界书内容超过 48000 字符预算，跳过：${name}`);
+      const remaining = worldBudget - worldChars;
+      if (remaining <= 0) {
+        warnings.push(`世界书预算已用尽，未注入：${name}`);
         continue;
       }
+      // Keep an activated entry visible whenever there is room. Truncating the
+      // tail is much more useful than dropping the whole entry, especially for
+      // cards whose first paragraphs contain the actual setting/keywords.
+      const injectedContent = content.length > remaining ? content.slice(0, remaining) : content;
+      if (injectedContent.length < content.length) {
+        warnings.push(`世界书条目过长，本次截断 ${content.length - injectedContent.length} 字符：${name}`);
+      }
       activated.add(index);
-      worldChars += content.length;
-      additions += '\n' + content;
-      sources.push({ name, characters: content.length });
+      worldChars += injectedContent.length;
+      additions += '\n' + injectedContent;
+      sources.push({ name, characters: injectedContent.length });
       const position = e.position ?? ext.position ?? 0;
       if (
         ![0, 1, 4, 'before_char', 'after_char', 'at_depth'].includes(position as number | string)
@@ -229,7 +248,7 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
       const order = Number(e.order ?? e.insertion_order ?? 100);
       const role = Number(e.role ?? ext.role ?? 0);
       activatedEntries.push({
-        content,
+        content: injectedContent,
         order: Number.isFinite(order) ? order : 100,
         position,
         depth: Math.max(0, Number(e.depth ?? ext.depth ?? 0) || 0),
@@ -361,7 +380,7 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
   const messages = candidatesToSend.map((item) => item.message);
   if (messages.some((m) => m.content.includes('<%')))
     warnings.push('检测到 EJS 提示词模板：当前未执行模板脚本，原文保留，请先检查发送内容。');
-  const budget = generationBudget(p);
+  const budget = generation;
   warnings.push(...budget.warnings);
   let chars = messages.reduce((n, m) => n + m.content.length, 0);
   let count = messages.length;

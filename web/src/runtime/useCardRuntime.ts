@@ -79,19 +79,47 @@ function snapshot(o: Options): RuntimeSnapshot {
 export function useCardRuntime(options: Options) {
   const latest = useRef(options);
   latest.current = options;
+  const snapshotCache = useRef<{
+    character: CharacterCardData;
+    session: ChatSession;
+    presetKey?: string;
+    userName?: string;
+    value: RuntimeSnapshot;
+  } | null>(null);
+  const readSnapshot = (input: Options): RuntimeSnapshot => {
+    const cached = snapshotCache.current;
+    if (
+      cached &&
+      cached.character === input.character &&
+      cached.session === input.session &&
+      cached.presetKey === input.presetKey &&
+      cached.userName === input.userName
+    ) {
+      return cached.value;
+    }
+    const value = snapshot(input);
+    snapshotCache.current = {
+      character: input.character,
+      session: input.session,
+      presetKey: input.presetKey,
+      userName: input.userName,
+      value,
+    };
+    return value;
+  };
   const lastCharacter = useRef(options.character);
   const bridge = useMemo(
-    () => new CardBridge(snapshot(options)),
+    () => new CardBridge(readSnapshot(options)),
     [options.character.id, options.session.id],
   );
   // New documents must read current render inputs, before passive snapshot broadcasts run.
-  bridge.getSnapshot = () => snapshot(latest.current);
+  bridge.getSnapshot = () => readSnapshot(latest.current);
   useEffect(() => {
     bridge.start();
     return () => bridge.destroy();
   }, [bridge]);
   useEffect(() => {
-    const next = snapshot(options);
+    const next = readSnapshot(options);
     const previousCharacter = lastCharacter.current;
     const characterChangedOnlyVariables =
       previousCharacter !== options.character &&
@@ -137,7 +165,7 @@ export function useCardRuntime(options: Options) {
     const persistMessages = async (messages: ChatSession['messages']) => {
       const next = o.sessions.map((s) => (s.id === o.session.id ? { ...s, messages } : s));
       latest.current = { ...o, sessions: next, session: { ...o.session, messages } };
-      const nextSnapshot = snapshot(latest.current);
+      const nextSnapshot = readSnapshot(latest.current);
       // Message edits are common in helper scripts. Send only the changed
       // message list and variable tables; cloning the character lorebook into
       // every iframe here made large cards visibly stutter and could starve
@@ -172,6 +200,9 @@ export function useCardRuntime(options: Options) {
         if (JSON.stringify(value).length > 4 * 1024 * 1024)
           throw new Error('单个变量表超过 4 MiB 限制');
         bridge.updateVariable(key, structuredClone(value));
+        // Variable stores can change without a React render. Invalidate the
+        // memo before a card immediately asks for a fresh generation snapshot.
+        snapshotCache.current = null;
         if (key === 'global' || key === 'preset') {
           localStorage.setItem(
             key === 'global'
@@ -312,9 +343,9 @@ export function useCardRuntime(options: Options) {
           };
           const messages = [...o.session.messages, message];
           await persistMessages(messages);
-          return await o.generate(o.session.id, messages, snapshot(latest.current).variables);
+          return await o.generate(o.session.id, messages, readSnapshot(latest.current).variables);
         }
-        return await o.generate(o.session.id, o.session.messages, snapshot(latest.current).variables);
+        return await o.generate(o.session.id, o.session.messages, readSnapshot(latest.current).variables);
       }
       case 'triggerSlash':
         return await slash(String(args[0]), bridge, latest);
