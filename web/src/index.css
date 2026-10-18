@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+@import './styles/studio.css';
+@import './styles/chat.css';
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body,
+  html,
+  #root {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #0d0f17;
+    color: #e2e8f0;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB',
+      'Microsoft YaHei', sans-serif;
+    user-select: none;
+  }
+}
+
+/* React Flow custom styles */
+.react-flow__attribution {
+  display: none !important;
+}
+
+.react-flow__handle {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}

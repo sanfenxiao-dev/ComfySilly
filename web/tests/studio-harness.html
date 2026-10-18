@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Studio fixture harness — not production user data</title>
+  </head>
+  <body style="margin: 0">
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import App from '/src/App.tsx';
+      import '/src/index.css';
+      const cover = (title, bg, accent) =>
+        'data:image/svg+xml,' +
+        encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="640"><rect width="500" height="640" fill="${bg}"/><circle cx="350" cy="200" r="125" fill="${accent}" opacity=".5"/><path d="M0 550L180 260L290 430L500 310V640H0Z" fill="${accent}" opacity=".35"/><path d="M0 590L200 440L500 540V640H0Z" fill="${accent}" opacity=".25"/><text x="40" y="82" fill="#fff" opacity=".5" font-size="14" font-family="Segoe UI" letter-spacing="6">A COMFYSILLY STORY</text><text x="40" y="556" fill="#fff" font-size="32" font-family="Microsoft YaHei">${title}</text><text x="40" y="593" fill="#fff" opacity=".5" font-size="12" letter-spacing="4">THE UNWRITTEN CHAPTER</text></svg>`,
+        );
+      const names = ['雨后的书店', '山海来信', '无声的星际', '薄暮花园', '长夜微光'];
+      const characters = names.map((name, i) => ({
+        id: 'fixture-' + i,
+        name,
+        creator: ['林间', '渡川', '北辰', '青枝', '拾光'][i],
+        character_version: '1.0',
+        description: '这里是一个安静的故事。你可以决定它的下一页。',
+        personality: '温和、敏锐',
+        scenario: '秋日的傍晚',
+        first_mes:
+          '雨停了。窗沿还残留着水珠，街角的书店亮起一盏灯。\n\n“你终于来了。”她把手中的书轻轻合上，望向门口。\n\n> 有些故事，要等到相遇才会开始。',
+        avatar_b64: cover(
+          name,
+          ['#34473f', '#49505b', '#303f50', '#514344', '#454335'][i],
+          ['#b2c7ac', '#bbc3d0', '#9cafce', '#d8b2ad', '#c5ba93'][i],
+        ),
+        lorebook: {
+          name: '角色的世界',
+          entries: [
+            { uid: 1, comment: '书店', key: ['书店'], content: '坐落在旧街区的二层小书店。' },
+          ],
+        },
+        sessions:
+          i === 0
+            ? [
+                {
+                  id: 'fixture-session',
+                  title: '灯火初见',
+                  updatedAt: '2026-10-18T01:00:00.000Z',
+                  messages: [
+                    {
+                      id: 'first',
+                      role: 'assistant',
+                      content:
+                        '雨停了。窗沿还残留着水珠，街角的书店亮起一盏灯。\n\n“你终于来了。”她把手中的书轻轻合上，望向门口。\n\n> 有些故事，要等到相遇才会开始。',
+                      timestamp: '2026-10-18T01:00:00.000Z',
+                    },
+                    {
+                      id: 'second',
+                      role: 'user',
+                      name: '旅人',
+                      content: '路上耽误了一会儿。你上次说的那本书，找到了吗？',
+                      timestamp: '2026-10-18T01:01:00.000Z',
+                    },
+                    {
+                      id: 'third',
+                      role: 'assistant',
+                      content:
+                        '她没有立刻回答，而是从柜台下取出一本旧书。\n\n书脊是褪了色的青绿，封面没有标题。她的手指在边缘停了一瞬，像在确认什么。\n\n“找到了。但有个小问题——”她笑了笑，把书推到你面前，“里面的故事，似乎还没有写完。”',
+                      timestamp: '2026-10-18T01:02:00.000Z',
+                    },
+                  ],
+                },
+              ]
+            : [],
+      }));
+      const books = [
+        {
+          name: '旧城纪事',
+          path: 'fixture-lore-0',
+          entries: [
+            { uid: 1, comment: '旧街区', keys: ['街区'], enabled: false, content: '秋天的街区。' },
+          ],
+        },
+        {
+          name: '海与远方',
+          path: 'fixture-lore-1',
+          entries: [{ uid: 1, comment: '潮汐', constant: true, content: '潮声是旅途的起点。' }],
+        },
+        { name: '星际档案', path: 'fixture-lore-2', entries: [] },
+      ];
+      books.forEach((b) => (b.storageName = b.name));
+      let settings = {
+        activeProviderId: 'test-provider',
+        providers: [
+          {
+            id: 'test-provider',
+            name: '本地测试连接',
+            model: 'fixture-model',
+            baseUrl: 'http://127.0.0.1:1/v1',
+            apiKey: 'TEST_FIXTURE_ONLY',
+            responseFormat: 'openai',
+            thinkingLevel: 'off',
+            temperature: 0.8,
+          },
+        ],
+        personas: [{ id: 'traveler', name: '旅人', description: '你是一名旅行者。' }],
+        activePersonaId: 'traveler',
+      };
+      window.fixtureState = {
+        characters,
+        books,
+        get settings() {
+          return settings;
+        },
+        requests: [],
+        writes: [],
+      };
+      const testPresets = new URLSearchParams(location.search).has('presets') ? [
+        {name:'长篇预设',path:'fixture-preset-a', data:{openai_max_context:32768,openai_max_tokens:99999,prompts:[{identifier:'main',content:'PRESET_A_MARKER'},{identifier:'chatHistory',marker:true}]}},
+        {name:'轻量预设',path:'fixture-preset-b', data:{openai_max_context:65536,openai_max_tokens:2048,prompts:[{identifier:'main',content:'PRESET_B_MARKER'},{identifier:'chatHistory',marker:true}]}}
+      ] : [];
+      window.__TAURI_INTERNALS__ = {
+        transformCallback: () => 1,
+        unregisterCallback: () => {},
+        invoke: async (cmd, args) => {
+          if (cmd === 'list_preset_library') return testPresets.map(({name,path})=>({name,path}));
+          if (cmd === 'list_character_library') return characters.map((c) => JSON.stringify(c));
+          if (cmd === 'list_worldbook_library')
+            return books.map((b) => ({ name: b.storageName ?? b.name, path: b.path }));
+          if (cmd === 'load_preset_file') {
+            const preset = testPresets.find(p=>p.path===args.filePath);
+            if(preset) return JSON.stringify(preset.data);
+            const b = books.find((b) => b.path === args.filePath);
+            if (!b) throw Error('Unknown fixture path');
+            return JSON.stringify(b);
+          }
+          if (cmd === 'load_app_settings') return JSON.stringify(settings);
+          if (cmd === 'save_app_settings') {
+            settings = JSON.parse(args.settingsJson);
+            return true;
+          }
+          if (cmd === 'save_character_to_library') {
+            const c = JSON.parse(args.payloadJson);
+            const i = characters.findIndex((x) => x.id === c.id);
+            if (i >= 0) characters[i] = c;
+            else characters.push(c);
+            window.fixtureState.writes.push(structuredClone(c));
+            return 'fixture';
+          }
+          if (cmd === 'save_worldbook_to_library') {
+            const book = JSON.parse(args.content);
+            const i = books.findIndex((b) => (b.storageName ?? b.name) === args.name);
+            if (i >= 0) books[i] = { ...books[i], ...book };
+            else books.push({ ...book, path: 'fixture-lore-' + books.length });
+            return 'fixture';
+          }
+          if (cmd === 'list_provider_models') return ['fixture-model', 'fixture-reasoning'];
+          if (cmd === 'generate_chat') {
+            window.fixtureState.requests.push(args.request);
+            for (const delta of ['这是新的', '故事版本。']) {
+              args.onEvent.onmessage({ requestId: args.request.requestId, delta });
+              await new Promise((r) => setTimeout(r, 100));
+            }
+            return { text: '这是新的故事版本。' };
+          }
+          if (cmd === 'cancel_generation') return true;
+          if (cmd === 'delete_worldbook_from_library') {
+            const i = books.findIndex((b) => b.path === args.path);
+            books.splice(i, 1);
+            return true;
+          }
+          if (cmd === 'delete_character_from_library') {
+            const i = characters.findIndex((c) => c.id === args.id);
+            characters.splice(i, 1);
+            return true;
+          }
+          throw Error('Unexpected fixture IPC: ' + cmd);
+        },
+      };
+      createRoot(document.getElementById('root')).render(React.createElement(App));
+    </script>
+  </body>
+</html>

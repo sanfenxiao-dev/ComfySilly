@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>ComfySilly Chat Regression Harness</title></head><body style="margin:0"><div id="root" style="height:100vh"></div><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { ChatRoom } from '/src/components/ChatRoom.tsx';
+import '/src/index.css';
+const card = await fetch('/__test__/card.json').then(r => r.json());
+window.savedCharacters = [];
+let settings;
+if (new URLSearchParams(location.search).has('generation')) {
+  settings={activeProviderId:'test-provider',providers:[{id:'test-provider',name:'测试服务',model:'fixture-model',baseUrl:'http://127.0.0.1:1/v1',apiKey:'TEST_ONLY_KEY_NOT_FOR_CARDS',responseFormat:'openai',thinkingLevel:'off',temperature:0.5}]};
+  window.testRequests=[];
+  window.__TAURI_INTERNALS__={transformCallback:()=>1,unregisterCallback:()=>{},invoke:async(cmd,args)=>{
+    if(cmd==='generate_chat') {
+      window.testRequests.push(args.request);
+      const reply = new URLSearchParams(location.search).has('era')
+        ? '<content>真实链路测试回复：博丽神社的清晨，灵梦走到门前。</content>\n<StatusPlaceHolderImpl/>'
+        : '真实链路测试回复';
+      for (const delta of [reply.slice(0,12),reply.slice(12)]) { args.onEvent.onmessage({requestId:args.request.requestId,delta}); await new Promise(r=>setTimeout(r,100)); }
+      return {text:reply,usage:{prompt_tokens:12,completion_tokens:8}};
+    }
+    if(cmd==='cancel_generation')return true;
+    throw new Error('Unexpected test IPC: '+cmd);
+  }};
+}
+function Harness(){
+ const [current,setCurrent]=React.useState(card);
+ const save=async updated=>{if(window.failNextSave){window.failNextSave=false;throw Error('EXPLICIT_TEST_DISK_FAILURE');}await new Promise(resolve=>setTimeout(resolve,20));setCurrent(updated);window.savedCharacters.push(structuredClone(updated));};
+ return React.createElement(ChatRoom,{character:current,settings,onBackToShelf:()=>{},onUpdateCharacterSessions:save,onOpenLorebookModal:()=>{}});
+}
+createRoot(document.getElementById('root')).render(React.createElement(Harness));
+</script></body></html>

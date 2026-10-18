@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+pnpm-lock.yaml.tmp
+
+# Builds
+dist/
+dist-ssr/
+build/
+releases/
+web/src-tauri/target/
+
+# Local cache and logs
+*.log
+logs/
+.DS_Store
+Thumbs.db
+.test-results/
+
+# Temporary patch scripts and scratch files
+temp_js_slash_runner/
+*.tmp
