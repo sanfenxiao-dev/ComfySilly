@@ -142,6 +142,10 @@ window.addEventListener('message', (event) => {
     }
   }
   if (data.type === 'snapshot') snapshot = data.snapshot;
+  if (data.type === 'messages') {
+    snapshot.messages = data.messages ?? snapshot.messages;
+    if (data.variables) snapshot.variables = data.variables;
+  }
   if (data.type === 'variable' && typeof data.key === 'string' && data.value)
     snapshot.variables[data.key] = data.value;
   if (data.type === 'event')

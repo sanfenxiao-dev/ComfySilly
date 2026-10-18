@@ -72,6 +72,12 @@ export class CardBridge {
     this.snapshot.variables[key] = value;
     for (const frame of this.frames.values()) this.send(frame, { type: 'variable', key, value });
   }
+  updateMessages(messages: RuntimeMessage[], variables?: RuntimeSnapshot['variables']) {
+    this.snapshot.messages = messages;
+    if (variables) this.snapshot.variables = variables;
+    for (const frame of this.frames.values())
+      this.send(frame, { type: 'messages', messages, variables: variables ?? this.snapshot.variables });
+  }
   private send(frame: Frame, data: Record<string, unknown>) {
     frame.window.postMessage({ channel: 'comfysilly-card-v1', token: frame.token, ...data }, '*');
   }
