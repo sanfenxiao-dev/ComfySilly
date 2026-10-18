@@ -417,6 +417,9 @@ export function ChatRoom({
             }, 50);
         },
       );
+      // Stop rendering the transient stream before committing the final message.
+      // Otherwise React briefly shows the same reply twice while the async save runs.
+      if (mounted.current) setStreamText('');
       await finish(result.text);
       setNotice(
         `回复完成 · ${provider.model}${result.usage ? ` · 用量 ${JSON.stringify(result.usage)}` : ''}${historyWarning ? ` · ${historyWarning}` : ''}`,

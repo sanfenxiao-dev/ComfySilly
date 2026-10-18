@@ -81,7 +81,16 @@ export function applyDisplayRules(
 }
 
 const htmlTag =
-  /<(?:!doctype\s+html|html\b|head\b|body\b|script\b|div\b|section\b|main\b|style\b|iframe\b|button\b|form\b|article\b)/i;
+  /<\/?(?:!doctype\s+html|html\b|head\b|body\b|script\b|style\b|div\b|section\b|main\b|article\b|details\b|summary\b|button\b|form\b|input\b|textarea\b|select\b|option\b|label\b|table\b|ul\b|ol\b|li\b|iframe\b)/i;
+
+function isLikelyHtmlFragment(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed || !htmlTag.test(trimmed)) return false;
+  // A raw fragment may be prefixed by a closing tag after an earlier regex
+  // removed an opening wrapper. Require a real element attribute/content marker
+  // so ordinary prose containing "<content>" is not turned into executable HTML.
+  return /<\/?(?:details|summary|button|div|section|main|article|form|input|textarea|select|option|label|table|ul|ol|li|iframe)\b[^>]*>/i.test(trimmed);
+}
 /** Recognize fenced HTML without leaking the fences into the HTML document. */
 export function splitMessageParts(text: string): MessagePart[] {
   const parts: MessagePart[] = [];
@@ -99,7 +108,7 @@ export function splitMessageParts(text: string): MessagePart[] {
   const tail = text.slice(last);
   if (tail.trim()) {
     const fullDocument = /^\s*(?:<!doctype\s+html[^>]*>\s*)?<(?:html|body)\b/i.test(tail);
-    parts.push({ kind: fullDocument ? 'html' : 'text', content: tail });
+    parts.push({ kind: fullDocument || isLikelyHtmlFragment(tail) ? 'html' : 'text', content: tail });
   }
   return parts;
 }

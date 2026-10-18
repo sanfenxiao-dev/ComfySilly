@@ -20,6 +20,10 @@ test('standalone document is recognized; prose containing HTML is not', () => {
   assert.equal(splitMessageParts('<!doctype html><html><body>ok</body></html>')[0].kind, 'html');
   assert.equal(splitMessageParts('这是 <body> 标签')[0].kind, 'text');
 });
+test('raw interactive fragments are mounted instead of escaped as Markdown', () => {
+  const raw = '</details><div class="choices"><button data-choice="1">继续</button></div>';
+  assert.deepEqual(splitMessageParts(raw), [{ kind: 'html', content: raw }]);
+});
 test('display rules respect disabled, prompt-only and message role', () => {
   const rules = [
     { findRegex: 'a', replaceString: 'bad', disabled: true },

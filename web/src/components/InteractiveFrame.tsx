@@ -40,7 +40,13 @@ export function InteractiveFrame({
       window: win,
       token: identity.token,
       onResize: (h) => setHeight((prev) => (Math.abs(prev - h) > 2 ? h : prev)),
-      onError: (e) => setErrors((old) => [...old.slice(-9), e]),
+      onError: (e) =>
+        setErrors((old) => {
+          // Third-party pages often report one failed request through both jQuery
+          // ajaxError and window.onerror. Keep the card readable and actionable.
+          if (old.at(-1) === e) return old;
+          return [...old.slice(-9), e];
+        }),
     });
   }, [bridge, identity]);
   const status = errors.length > 0 && (

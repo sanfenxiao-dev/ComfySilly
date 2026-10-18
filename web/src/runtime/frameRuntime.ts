@@ -38,7 +38,18 @@ const rpc = (method: string, args: any[] = []): Promise<any> =>
     pending.set(id, { resolve, reject, timer });
     post('call', { id, method, args });
   });
-const report = (error: unknown) => post('error', { message: String(error).slice(0, 3000) });
+let lastReportedError = '';
+let lastReportedAt = 0;
+const report = (error: unknown) => {
+  const message = String(error).slice(0, 3000);
+  const now = Date.now();
+  // jQuery ajaxError + window.onerror commonly report the same failed request
+  // in the same tick. Do not turn one network failure into a wall of duplicates.
+  if (message === lastReportedError && now - lastReportedAt < 1500) return;
+  lastReportedError = message;
+  lastReportedAt = now;
+  post('error', { message });
+};
 const clone = <T>(v: T): T => structuredClone(v);
 const eventOn = (name: string, fn: (...a: any[]) => unknown) => {
   if (!listeners.has(name)) listeners.set(name, new Set());
