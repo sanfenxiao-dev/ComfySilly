@@ -40,7 +40,7 @@ import {
 import type { DisplayRule } from '../utils/messagePresentation';
 import { extractRegexRulesFromPreset } from '../utils/presetImporter';
 import type { SillyPresetJson } from '../utils/presetImporter';
-import { compilePrompt, generationBudget } from '../utils/promptCompiler';
+import { compilePrompt } from '../utils/promptCompiler';
 import { cardTrustKey, readCardTrust, writeCardTrust } from '../utils/cardTrust';
 import type { PromptBook, PromptCompilation } from '../utils/promptCompiler';
 import { generateChat, cancelGeneration } from '../utils/generation';
@@ -98,7 +98,6 @@ export function ChatRoom({
   presets = [],
   onSelectPreset,
   worldbooks,
-  onOpenSettings,
   initialSessionId,
   onBackToShelf,
   onUpdateCharacterSessions,
@@ -191,9 +190,7 @@ export function ChatRoom({
     };
   }, [trustPayload, character.id]);
   const [switchingPreset, setSwitchingPreset] = useState(false);
-  const [budgetOpen, setBudgetOpen] = useState(false);
-  const [budgetDraft, setBudgetDraft] = useState({ contextWindow: 32768, maxOutputTokens: 4096 });
-  const [budgetOverrides, setBudgetOverrides] = useState<
+  const [budgetOverrides] = useState<
     Record<string, { contextWindow: number; maxOutputTokens: number }>
   >(() => {
     try {
@@ -214,7 +211,6 @@ export function ChatRoom({
         : preset,
     [preset, budgetOverride],
   );
-  const budget = generationBudget(effectivePreset);
   const [scriptButtons, setScriptButtons] = useState<Array<{ name: string; visible?: boolean }>>(
     [],
   );
@@ -1120,19 +1116,6 @@ export function ChatRoom({
                 )}
               </div>
               <div className="compose-tools">
-                <button onClick={onOpenSettings}>AI 设置</button>
-                <button
-                  className={budget.warnings.length ? 'retry-button' : ''}
-                  onClick={() => {
-                    setBudgetDraft({
-                      contextWindow: budget.contextWindow,
-                      maxOutputTokens: budget.maxOutputTokens,
-                    });
-                    setBudgetOpen(true);
-                  }}
-                >
-                  生成参数{budget.warnings.length ? ' · 已修正冲突' : ''}
-                </button>
                 <button
                   onClick={() => {
                     try {
@@ -1175,96 +1158,6 @@ export function ChatRoom({
           </div>
         </div>
       </div>
-      <Dialog
-        open={budgetOpen}
-        onClose={() => setBudgetOpen(false)}
-        title="当前预设的生成参数"
-        className="budget-dialog"
-      >
-        <p>
-          预设：{presetName}
-          。这里的覆盖会保存到本机，不改写导入的原始预设。上下文请按模型实际能力填写，不会自动识别模型上限。
-        </p>
-        {budget.warnings.map((w) => (
-          <p key={w} role="status">
-            {w}
-          </p>
-        ))}
-        <label>
-          上下文窗口（输入＋回复 tokens）
-          <input
-            aria-label="上下文窗口"
-            type="number"
-            min={1024}
-            max={2000000}
-            value={budgetDraft.contextWindow}
-            onChange={(e) =>
-              setBudgetDraft({ ...budgetDraft, contextWindow: Number(e.target.value) })
-            }
-          />
-        </label>
-        <label>
-          最大回复 tokens
-          <input
-            aria-label="最大回复 tokens"
-            type="number"
-            min={1}
-            max={131072}
-            value={budgetDraft.maxOutputTokens}
-            onChange={(e) =>
-              setBudgetDraft({ ...budgetDraft, maxOutputTokens: Number(e.target.value) })
-            }
-          />
-        </label>
-        <p>
-          输入预算：{Math.max(0, budgetDraft.contextWindow - budgetDraft.maxOutputTokens)}{' '}
-          tokens。按字符估算；超预算时仅在本次请求中省略较早历史，并在提示词预览中说明。完整记录、预设提示词和最新一轮对话会保留。
-        </p>
-        <div className="dialog-actions">
-          <button
-            className="button"
-            onClick={() => {
-              try {
-                const next = { ...budgetOverrides };
-                delete next[presetKey];
-                localStorage.setItem('comfysilly:generation-budgets', JSON.stringify(next));
-                setBudgetOverrides(next);
-                setBudgetOpen(false);
-              } catch (error) {
-                setNotice(String(error));
-              }
-            }}
-          >
-            恢复预设值
-          </button>
-          <button
-            className="button button-primary"
-            disabled={
-              generating ||
-              !Number.isInteger(budgetDraft.contextWindow) ||
-              budgetDraft.contextWindow < 1024 ||
-              budgetDraft.contextWindow > 2000000 ||
-              !Number.isInteger(budgetDraft.maxOutputTokens) ||
-              budgetDraft.maxOutputTokens < 1 ||
-              budgetDraft.maxOutputTokens > 131072 ||
-              budgetDraft.maxOutputTokens >= budgetDraft.contextWindow
-            }
-            onClick={() => {
-              try {
-                const next = { ...budgetOverrides, [presetKey]: budgetDraft };
-                localStorage.setItem('comfysilly:generation-budgets', JSON.stringify(next));
-                setBudgetOverrides(next);
-                setBudgetOpen(false);
-                setNotice('生成参数已保存，下一次请求生效。');
-              } catch (error) {
-                setNotice(String(error));
-              }
-            }}
-          >
-            保存生成参数
-          </button>
-        </div>
-      </Dialog>
       <ConfirmDialog
         open={!!deleting}
         title="删除这段对话？"

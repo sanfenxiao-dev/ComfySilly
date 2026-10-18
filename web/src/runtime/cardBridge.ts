@@ -1,4 +1,5 @@
 import runtimeSource from '../generated/card-runtime.js?raw';
+import { invoke } from '@tauri-apps/api/core';
 export interface RuntimeMessage {
   message_id: number;
   role: string;
@@ -67,6 +68,10 @@ export class CardBridge {
     this.snapshot = snapshot;
     for (const frame of this.frames.values()) this.send(frame, { type: 'snapshot', snapshot });
   }
+  updateVariable(key: string, value: Record<string, unknown>) {
+    this.snapshot.variables[key] = value;
+    for (const frame of this.frames.values()) this.send(frame, { type: 'variable', key, value });
+  }
   private send(frame: Frame, data: Record<string, unknown>) {
     frame.window.postMessage({ channel: 'comfysilly-card-v1', token: frame.token, ...data }, '*');
   }
@@ -120,6 +125,8 @@ export class CardBridge {
       const work =
         data.method === 'eventEmit'
           ? this.emit(String(data.args[0]), data.args[1])
+          : data.method === 'networkRequest'
+            ? invoke('card_network_request', { requestJson: JSON.stringify(data.args[0] ?? {}) })
           : this.onCall(String(data.method), data.args);
       Promise.resolve(work)
         .then((value) => this.send(frame, { type: 'result', id: data.id, value }))

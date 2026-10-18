@@ -3,7 +3,9 @@ mod providers;
 mod secrets;
 mod storage;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PipelineExecutionResult {
@@ -274,6 +276,112 @@ async fn load_app_settings() -> Result<String, String> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CardNetworkRequest {
+    url: String,
+    #[serde(default = "default_get")]
+    method: String,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+    body: Option<String>,
+}
+fn default_get() -> String {
+    "GET".into()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CardNetworkResponse {
+    status: u16,
+    headers: HashMap<String, String>,
+    body: String,
+}
+
+/// Proxy trusted card requests through the host. Sandboxed frames have an
+/// opaque origin and therefore send `Origin: null`, which some card servers
+/// reject. Provider credentials never enter this API.
+#[tauri::command]
+async fn card_network_request(request_json: String) -> Result<CardNetworkResponse, String> {
+    let request: CardNetworkRequest =
+        serde_json::from_str(&request_json).map_err(|e| format!("卡片网络请求无效：{e}"))?;
+    let url = reqwest::Url::parse(request.url.trim()).map_err(|_| "卡片 URL 无效".to_string())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("卡片只能请求不带账号密码的 HTTP(S) 地址".into());
+    }
+    let method = reqwest::Method::from_bytes(request.method.to_uppercase().as_bytes())
+        .map_err(|_| "卡片 HTTP 方法无效".to_string())?;
+    if !matches!(
+        method,
+        reqwest::Method::GET
+            | reqwest::Method::POST
+            | reqwest::Method::PUT
+            | reqwest::Method::DELETE
+            | reqwest::Method::PATCH
+            | reqwest::Method::HEAD
+    ) {
+        return Err("卡片 HTTP 方法不在允许范围内".into());
+    }
+    if request.body.as_ref().map_or(0, String::len) > 16 * 1024 * 1024 {
+        return Err("卡片请求体超过 16 MiB 限制".into());
+    }
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(45))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut builder = client.request(method, url);
+    for (name, value) in request.headers {
+        if matches!(
+            name.to_ascii_lowercase().as_str(),
+            "host" | "origin" | "referer" | "cookie" | "authorization"
+        ) {
+            continue;
+        }
+        builder = builder.header(name, value);
+    }
+    if let Some(body) = request.body {
+        builder = builder.body(body);
+    }
+    let response = builder
+        .send()
+        .await
+        .map_err(|e| format!("卡片网络请求失败：{e}"))?;
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.to_string(), v.to_string()))
+        })
+        .filter(|(name, _)| {
+            matches!(
+                name.as_str(),
+                "content-type" | "content-length" | "location" | "etag" | "last-modified"
+            )
+        })
+        .collect();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("读取卡片响应失败：{e}"))?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err("卡片响应超过 16 MiB 限制".into());
+    }
+    Ok(CardNetworkResponse {
+        status,
+        headers,
+        body: String::from_utf8_lossy(&bytes).into_owned(),
+    })
+}
+
 /// Only a native save dialog can select the destination. Frames never receive this IPC.
 #[tauri::command]
 async fn export_chat_file(
@@ -346,6 +454,7 @@ pub fn run() {
             delete_character_from_library,
             save_app_settings,
             load_app_settings,
+            card_network_request,
             export_chat_file
         ])
         .run(tauri::generate_context!())

@@ -33,12 +33,25 @@ export function applyDisplayRules(
     }
     if (rule.disabled || (rule.promptOnly && !rule.markdownOnly)) continue;
     const placement = role === 'user' ? 1 : role === 'assistant' ? 2 : 0;
-    if (rule.placement?.length && !rule.placement.includes(placement)) continue;
-    if (rule.minDepth != null && rule.minDepth >= 0 && depth < rule.minDepth) continue;
-    if (rule.maxDepth != null && rule.maxDepth >= 0 && depth > rule.maxDepth) continue;
-    if (!rule.findRegex) continue;
+    const placements = Array.isArray(rule.placement)
+      ? rule.placement
+      : rule.placement == null
+        ? []
+        : String(rule.placement)
+            .split(/[\s,|]+/)
+            .map(Number)
+            .filter(Number.isFinite);
+    if (placements.length && !placements.includes(placement)) continue;
+    const minDepth = rule.minDepth ?? (rule as any).min_depth;
+    const maxDepth = rule.maxDepth ?? (rule as any).max_depth;
+    if (minDepth != null && Number(minDepth) >= 0 && depth < Number(minDepth)) continue;
+    if (maxDepth != null && Number(maxDepth) >= 0 && depth > Number(maxDepth)) continue;
+    const findRegex = rule.findRegex ?? (rule as any).find_regex ?? (rule as any).find;
+    const replaceString =
+      rule.replaceString ?? (rule as any).replace_string ?? (rule as any).replace ?? '';
+    if (!findRegex) continue;
     try {
-      const source = rule.findRegex;
+      const source = String(findRegex);
       const slash = source.lastIndexOf('/');
       const regex =
         source.startsWith('/') && slash > 0
@@ -49,7 +62,7 @@ export function applyDisplayRules(
         const match = String(args[0]);
         let trimmed = match;
         for (const trim of rule.trimStrings ?? []) if (trim) trimmed = trimmed.split(trim).join('');
-        const replacement = (rule.replaceString ?? '').split('{{match}}').join(trimmed);
+        const replacement = String(replaceString).split('{{match}}').join(trimmed);
         // Reapply to the isolated match; lookbehinds/lookaheads require the original context.
         const groups =
           typeof args.at(-1) === 'object' ? (args.at(-1) as Record<string, string>) : undefined;

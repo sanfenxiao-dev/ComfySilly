@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
 import type { CardBridge } from '../runtime/cardBridge';
 import { buildInteractiveDocument } from '../runtime/cardBridge';
 const EMPTY_SCRIPTS: unknown[] = [];
@@ -30,6 +31,7 @@ export function InteractiveFrame({
         messageId,
         mode: background ? 'background' : 'message',
         scripts,
+        networkProxy: isTauri(),
       }),
     [html, bridge, identity, messageId, background, scripts],
   );

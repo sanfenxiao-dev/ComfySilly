@@ -38,6 +38,37 @@ const rpc = (method: string, args: any[] = []): Promise<any> =>
     pending.set(id, { resolve, reject, timer });
     post('call', { id, method, args });
   });
+const cardNetworkRequest = async (request: any) => {
+  const value = (await rpc('networkRequest', [request])) as {
+    status: number;
+    headers?: Record<string, string>;
+    body: string;
+  };
+  return new Response(value.body ?? '', { status: value.status, headers: value.headers ?? {} });
+};
+const nativeFetch = globalThis.fetch?.bind(globalThis);
+if (nativeFetch && (window as any).__COMFY_CARD__?.networkProxy) {
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (/^https?:\/\//i.test(url)) {
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers ?? (typeof input === 'object' && 'headers' in input ? input.headers : undefined)).forEach((v, k) => (headers[k] = v));
+      return cardNetworkRequest({ url, method: init?.method ?? 'GET', headers, body: typeof init?.body === 'string' ? init.body : undefined });
+    }
+    return nativeFetch(input, init);
+  }) as typeof fetch;
+}
+class CardXMLHttpRequest {
+  method = 'GET'; url = ''; async = true; status = 0; readyState = 0; responseText = ''; response = '';
+  onload: (() => void) | null = null; onerror: (() => void) | null = null; onreadystatechange: (() => void) | null = null;
+  private headers: Record<string, string> = {};
+  open(method: string, url: string, async = true) { this.method = method; this.url = url; this.async = async; this.readyState = 1; this.onreadystatechange?.(); }
+  setRequestHeader(name: string, value: string) { this.headers[name] = value; }
+  send(body?: string) { void cardNetworkRequest({ url: this.url, method: this.method, headers: this.headers, body }).then((r) => { this.status = r.status; return r.text(); }).then((text) => { this.responseText = text; this.response = text; this.readyState = 4; this.onreadystatechange?.(); this.onload?.(); }).catch(() => { this.readyState = 4; this.onreadystatechange?.(); this.onerror?.(); }); }
+  abort() {}
+  getAllResponseHeaders() { return ''; }
+}
+if ((window as any).__COMFY_CARD__?.networkProxy) (globalThis as any).XMLHttpRequest = CardXMLHttpRequest;
 let lastReportedError = '';
 let lastReportedAt = 0;
 const report = (error: unknown) => {
@@ -104,6 +135,8 @@ window.addEventListener('message', (event) => {
     }
   }
   if (data.type === 'snapshot') snapshot = data.snapshot;
+  if (data.type === 'variable' && typeof data.key === 'string' && data.value)
+    snapshot.variables[data.key] = data.value;
   if (data.type === 'event')
     void dispatch(data.name, data.args ?? []).finally(() => post('eventDone', { id: data.id }));
 });
@@ -134,7 +167,10 @@ const getVariables = (option?: Obj) => clone(snapshot.variables[scope(option)] ?
 const replaceVariables = (value: Obj, option?: Obj) => {
   const key = scope(option);
   snapshot.variables[key] = clone(value);
-  void rpc('replaceVariables', [key, value]).catch(report);
+  return rpc('replaceVariables', [key, value]).catch((error) => {
+    report(error);
+    throw error;
+  });
 };
 const updateVariablesWith = (fn: (v: Obj) => Obj | Promise<Obj>, option?: Obj) => {
   const result = fn(getVariables(option));

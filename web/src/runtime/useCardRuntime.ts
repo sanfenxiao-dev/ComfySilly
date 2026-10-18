@@ -72,6 +72,7 @@ function snapshot(o: Options): RuntimeSnapshot {
 export function useCardRuntime(options: Options) {
   const latest = useRef(options);
   latest.current = options;
+  const lastCharacter = useRef(options.character);
   const bridge = useMemo(
     () => new CardBridge(snapshot(options)),
     [options.character.id, options.session.id],
@@ -83,7 +84,45 @@ export function useCardRuntime(options: Options) {
     return () => bridge.destroy();
   }, [bridge]);
   useEffect(() => {
-    bridge.update(snapshot(options));
+    const next = snapshot(options);
+    const previousCharacter = lastCharacter.current;
+    const characterChangedOnlyVariables =
+      previousCharacter !== options.character &&
+      previousCharacter.id === options.character.id &&
+      previousCharacter.name === options.character.name &&
+      previousCharacter.description === options.character.description &&
+      previousCharacter.personality === options.character.personality &&
+      previousCharacter.scenario === options.character.scenario &&
+      previousCharacter.first_mes === options.character.first_mes &&
+      previousCharacter.lorebook === options.character.lorebook &&
+      Object.keys(previousCharacter.extensions ?? {})
+        .filter((key) => key !== 'comfysilly_variables')
+        .every(
+          (key) =>
+            (previousCharacter.extensions ?? {})[key] ===
+            (options.character.extensions ?? {})[key],
+        ) &&
+      Object.keys(options.character.extensions ?? {})
+        .filter((key) => key !== 'comfysilly_variables')
+        .every(
+          (key) =>
+            (previousCharacter.extensions ?? {})[key] ===
+            (options.character.extensions ?? {})[key],
+        );
+
+    // Variable writes are frequent in author UI cards. Do not rebroadcast the
+    // whole snapshot (which may contain a multi-megabyte lorebook) to every
+    // iframe just because the persisted card object got a new wrapper.
+    if (
+      characterChangedOnlyVariables &&
+      previousCharacter.extensions?.comfysilly_variables !==
+        options.character.extensions?.comfysilly_variables
+    ) {
+      bridge.updateVariable('character', structuredClone(next.variables.character));
+    } else {
+      bridge.update(next);
+    }
+    lastCharacter.current = options.character;
   }, [bridge, options.character, options.session, options.presetKey, options.userName]);
   bridge.onNotice = (text) => latest.current.notice(text);
   bridge.onCall = async (method, args) => {
@@ -116,8 +155,7 @@ export function useCardRuntime(options: Options) {
           throw new Error('变量作用域或内容无效');
         if (JSON.stringify(value).length > 4 * 1024 * 1024)
           throw new Error('单个变量表超过 4 MiB 限制');
-        bridge.snapshot.variables[key] = structuredClone(value);
-        bridge.update(bridge.snapshot);
+        bridge.updateVariable(key, structuredClone(value));
         if (key === 'global' || key === 'preset') {
           localStorage.setItem(
             key === 'global'
