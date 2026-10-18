@@ -26,7 +26,7 @@ export function InteractiveFrame({
     () =>
       buildInteractiveDocument(html, {
         token: identity.token,
-        snapshot: bridge.snapshot,
+        snapshot: bridge.getSnapshot(),
         messageId,
         mode: background ? 'background' : 'message',
         scripts,
@@ -58,6 +58,8 @@ export function InteractiveFrame({
       {status}
       <iframe
         ref={ref}
+        onPointerEnter={() => bridge.onInteraction()}
+        onMouseEnter={() => bridge.onInteraction()}
         title={background ? '角色卡后台脚本' : '角色卡交互前端'}
         srcDoc={doc}
         sandbox="allow-scripts allow-modals"

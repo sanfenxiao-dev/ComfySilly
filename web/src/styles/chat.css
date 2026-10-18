@@ -644,6 +644,28 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* 居中阅读布局优化 */
+.layout-centered .chat-message {
+  margin: 0 auto 28px;
+  max-width: var(--reader-width, 760px);
+  width: 100%;
+}
+.layout-centered .message-body {
+  padding: 16px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+}
+.layout-centered .from-user .message-body {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--line));
+}
+.layout-centered .from-assistant .message-body {
+  background: var(--panel);
+  border-color: var(--line-soft);
+}
+
 .layout-bubbles .from-user {
   flex-direction: row-reverse;
   margin-left: 12%;

@@ -17,6 +17,17 @@ const pending = new Map<
 >();
 const post = (type: string, data: Obj = {}) =>
   window.parent.postMessage({ channel: 'comfysilly-card-v1', token, type, ...data }, '*');
+let lastInteraction = 0;
+for (const name of ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'])
+  document.addEventListener(
+    name,
+    () => {
+      if (Date.now() - lastInteraction < 100) return;
+      lastInteraction = Date.now();
+      post('interaction');
+    },
+    { capture: true, passive: true },
+  );
 const rpc = (method: string, args: any[] = []): Promise<any> =>
   new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
@@ -275,7 +286,9 @@ const helpers: Obj = {
     Promise.reject(new Error('generateRaw 尚未支持，请使用 generate / triggerSlash')),
   triggerSlash: (command: string) => rpc('triggerSlash', [command]),
   substituteParams,
-  retrieveDisplayedMessage: (id: number) => snapshot.messages[id]?.message ?? '',
+  // Only this frame's DOM is exposed. Background scripts cannot access host message DOM.
+  retrieveDisplayedMessage: (id: number) =>
+    init.mode === 'message' && id === getCurrentMessageId() ? $(document.body) : $(),
   formatAsDisplayedMessage: (message: string) => message,
   getSillyTavern: context,
   getContext: context,

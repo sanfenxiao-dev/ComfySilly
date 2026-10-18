@@ -30,6 +30,7 @@ export interface PromptInput {
   userName?: string;
   personaDescription?: string;
   variables?: Record<string, unknown>;
+  overflowPolicy?: 'error' | 'trim-history';
 }
 export interface PromptCompilation {
   messages: PromptMessage[];
@@ -55,7 +56,7 @@ export function generationBudget(preset?: SillyPresetJson | null): GenerationBud
   const rawOutput = Number(preset?.openai_max_tokens ?? 4096);
   let maxOutputTokens =
     Number.isFinite(rawOutput) && rawOutput > 0
-      ? Math.min(131072, Math.floor(rawOutput))
+      ? Math.max(1, Math.min(131072, Math.floor(rawOutput)))
       : Math.min(4096, Math.floor(contextWindow / 4));
   if (maxOutputTokens >= contextWindow) {
     maxOutputTokens = Math.min(4096, Math.floor(contextWindow / 4));
@@ -339,7 +340,10 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
         .filter((r: Entry) => r?.promptOnly === true)
         .map((r: Entry) => ({ ...r, promptOnly: false }))
     : [];
-  const messages = result
+  const historyMessages = new Set(historyCopy);
+  const latestUserIndex = historyCopy.findLastIndex((m) => m.role === 'user');
+  const protectedHistory = new Set(historyCopy.slice(latestUserIndex >= 0 ? latestUserIndex : -1));
+  const candidatesToSend = result
     .filter((m) => m.content.trim())
     .map((m, index) => {
       const processed = applyDisplayRules(
@@ -349,17 +353,43 @@ export function compilePrompt(input: PromptInput): PromptCompilation {
         result.length - index - 1,
       );
       warnings.push(...processed.diagnostics.map((d) => `${d.name}: ${d.error}`));
-      return { ...m, content: processed.text };
+      return {
+        message: { ...m, content: processed.text },
+        removable: historyMessages.has(m) && !protectedHistory.has(m),
+      };
     });
+  const messages = candidatesToSend.map((item) => item.message);
   if (messages.some((m) => m.content.includes('<%')))
     warnings.push('检测到 EJS 提示词模板：当前未执行模板脚本，原文保留，请先检查发送内容。');
-  const chars = messages.reduce((n, m) => n + m.content.length, 0);
-  const estimatedTokens = Math.ceil(chars / 2) + messages.length * 4;
   const budget = generationBudget(p);
   warnings.push(...budget.warnings);
+  let chars = messages.reduce((n, m) => n + m.content.length, 0);
+  let count = messages.length;
+  const tokens = () => Math.ceil(chars / 2) + count * 4;
+  const removed = new Set<PromptMessage>();
+  if (input.overflowPolicy === 'trim-history') {
+    for (const candidate of candidatesToSend) {
+      if (tokens() <= budget.inputBudget) break;
+      if (!candidate.removable) continue;
+      removed.add(candidate.message);
+      chars -= candidate.message.content.length;
+      count--;
+    }
+  }
+  const estimatedTokens = tokens();
   if (estimatedTokens > budget.inputBudget)
     throw new Error(
-      `输入约 ${estimatedTokens} tokens（字符估算），当前输入预算 ${budget.inputBudget} = 上下文 ${budget.contextWindow} − 回复预留 ${budget.maxOutputTokens}。请打开“生成参数”按模型能力调整上下文/回复上限，或缩短历史；未静默丢弃内容。`,
+      `输入约 ${estimatedTokens} tokens（字符估算），当前输入预算 ${budget.inputBudget} = 上下文 ${budget.contextWindow} − 回复预留 ${budget.maxOutputTokens}。请打开“生成参数”按模型能力调整上下文/回复上限，或缩短当前消息、角色设定与世界书；预设提示词和最新一轮对话不会自动删减。`,
     );
-  return { messages, sources, warnings: [...new Set(warnings)], estimatedTokens, budget };
+  if (removed.size)
+    warnings.push(
+      `本次请求省略了 ${removed.size} 条较早历史以适配输入预算；完整聊天记录仍保留在本地。`,
+    );
+  return {
+    messages: messages.filter((m) => !removed.has(m)),
+    sources,
+    warnings: [...new Set(warnings)],
+    estimatedTokens,
+    budget,
+  };
 }

@@ -32,7 +32,11 @@ import { ConfirmDialog, Dialog } from './Dialog';
 import { MessageContent } from './MessageContent';
 import { InteractiveFrame } from './InteractiveFrame';
 import { useCardRuntime } from '../runtime/useCardRuntime';
-import { getHelperScripts } from '../utils/messagePresentation';
+import {
+  getHelperScripts,
+  applyDisplayRules,
+  splitMessageParts,
+} from '../utils/messagePresentation';
 import type { DisplayRule } from '../utils/messagePresentation';
 import { extractRegexRulesFromPreset } from '../utils/presetImporter';
 import type { SillyPresetJson } from '../utils/presetImporter';
@@ -176,7 +180,8 @@ export function ChatRoom({
     let cancelled = false;
     void cardTrustKey(JSON.parse(trustPayload))
       .then((key) => {
-        if (!cancelled) setTrust({ source: trustPayload, key, enabled: readCardTrust(key) });
+        if (!cancelled)
+          setTrust({ source: trustPayload, key, enabled: readCardTrust(key, character.id) });
       })
       .catch((error) => {
         if (!cancelled) setNotice(`无法读取卡片信任记录：${String(error)}`);
@@ -184,7 +189,7 @@ export function ChatRoom({
     return () => {
       cancelled = true;
     };
-  }, [trustPayload]);
+  }, [trustPayload, character.id]);
   const [switchingPreset, setSwitchingPreset] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState({ contextWindow: 32768, maxOutputTokens: 4096 });
@@ -228,6 +233,7 @@ export function ChatRoom({
   const [copied, setCopied] = useState('');
   const viewport = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
+  const autoScrollPausedUntil = useRef(0);
   const [below, setBelow] = useState(false);
   const saveQueue = useRef(Promise.resolve());
   const pendingWrites = useRef(0);
@@ -283,7 +289,8 @@ export function ChatRoom({
       olderAnchor.current = null;
     }
   }, [visibleCount]);
-  const scrollDown = (smooth = true) => {
+  const scrollDown = (smooth = true, automatic = false) => {
+    if (automatic && (!nearBottom.current || Date.now() < autoScrollPausedUntil.current)) return;
     const el = viewport.current;
     if (el)
       el.scrollTo({
@@ -295,7 +302,7 @@ export function ChatRoom({
   };
   useEffect(() => {
     if (prefs.autoScroll && nearBottom.current) {
-      const id = requestAnimationFrame(() => scrollDown(false));
+      const id = requestAnimationFrame(() => scrollDown(false, true));
       return () => cancelAnimationFrame(id);
     }
   }, [current.messages, streamText, prefs.autoScroll]);
@@ -311,7 +318,7 @@ export function ChatRoom({
     const el = viewport.current?.firstElementChild;
     if (!el) return;
     const obs = new ResizeObserver(() => {
-      if (prefs.autoScroll && nearBottom.current) scrollDown(false);
+      if (prefs.autoScroll && nearBottom.current) scrollDown(false, true);
     });
     obs.observe(el);
     return () => obs.disconnect();
@@ -325,6 +332,7 @@ export function ChatRoom({
       userName: persona.name,
       personaDescription: persona.description,
       variables: sessionsRef.current.find((s) => s.id === sessionId)?.runtimeVariables?.chat,
+      overflowPolicy: 'trim-history',
     });
   const updateSession = (session: ChatSession) =>
     syncSessions(
@@ -387,8 +395,9 @@ export function ChatRoom({
     try {
       const compiled = compile(history, sessionId);
       setLastPrompt(compiled);
+      const historyWarning = compiled.warnings.find((w) => w.startsWith('本次请求省略'));
       setNotice(
-        `正在请求 ${provider.model} · 约 ${compiled.estimatedTokens} tokens（字符估算）${compiled.warnings.length ? ` · ${compiled.warnings.length} 项兼容性提示` : ''}`,
+        `正在请求 ${provider.model} · 约 ${compiled.estimatedTokens} tokens（字符估算）${compiled.warnings.length ? ` · ${compiled.warnings.length} 项兼容性提示` : ''}${historyWarning ? ` · ${historyWarning}` : ''}`,
       );
       const result = await generateChat(
         {
@@ -410,7 +419,7 @@ export function ChatRoom({
       );
       await finish(result.text);
       setNotice(
-        `回复完成 · ${provider.model}${result.usage ? ` · 用量 ${JSON.stringify(result.usage)}` : ''}`,
+        `回复完成 · ${provider.model}${result.usage ? ` · 用量 ${JSON.stringify(result.usage)}` : ''}${historyWarning ? ` · ${historyWarning}` : ''}`,
       );
       return result.text;
     } catch (error) {
@@ -445,6 +454,9 @@ export function ChatRoom({
     notice: setNotice,
     buttons: setScriptButtons,
   });
+  bridge.onInteraction = () => {
+    autoScrollPausedUntil.current = Date.now() + 2000;
+  };
   const pendingUiEvent = useRef<{ sessionId: string; name: string; index: number } | null>(null);
   useEffect(() => {
     const event = pendingUiEvent.current;
@@ -472,6 +484,7 @@ export function ChatRoom({
   }, [bridge, trusted, generating]);
   const send = () => {
     if (!input.trim() || generation.current) return;
+    autoScrollPausedUntil.current = 0;
     const message: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -619,9 +632,18 @@ export function ChatRoom({
       setNotice(`导出失败：${String(error)}`);
     }
   };
-  const isFrontend =
-    helperScripts.length > 0 ||
-    current.messages.some((m) => /<script|```html|<html|<iframe|<div/i.test(m.content));
+  const isFrontend = useMemo(
+    () =>
+      helperScripts.length > 0 ||
+      current.messages.some(
+        (m, index) =>
+          m.role === 'assistant' &&
+          splitMessageParts(
+            applyDisplayRules(m.content, rules, m.role, current.messages.length - index - 1).text,
+          ).some((part) => part.kind === 'html'),
+      ),
+    [helperScripts, current.messages, rules],
+  );
   return (
     <section className={`chat-room layout-${prefs.chatLayout} route-enter`}>
       <header className="chat-header">
@@ -711,7 +733,7 @@ export function ChatRoom({
             onClick={() => {
               const enabled = !trusted;
               try {
-                writeCardTrust(trust.key, enabled);
+                writeCardTrust(trust.key, enabled, character.id);
                 setTrust({ ...trust, enabled });
               } catch (error) {
                 setNotice(`信任记录保存失败，未改变权限：${String(error)}`);
@@ -1192,7 +1214,7 @@ export function ChatRoom({
         </label>
         <p>
           输入预算：{Math.max(0, budgetDraft.contextWindow - budgetDraft.maxOutputTokens)}{' '}
-          tokens。仅做字符估算检查，不会静默删减历史。
+          tokens。按字符估算；超预算时仅在本次请求中省略较早历史，并在提示词预览中说明。完整记录、预设提示词和最新一轮对话会保留。
         </p>
         <div className="dialog-actions">
           <button

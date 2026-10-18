@@ -28,10 +28,12 @@ export class CardBridge {
     { remaining: Set<string>; resolve: () => void; timer: ReturnType<typeof setTimeout> }
   >();
   snapshot: RuntimeSnapshot;
+  getSnapshot = (): RuntimeSnapshot => this.snapshot;
   onCall: (method: string, args: any[]) => Promise<any> = async () => {
     throw new Error('运行环境尚未就绪');
   };
   onNotice: (text: string) => void = () => {};
+  onInteraction: () => void = () => {};
   constructor(snapshot: RuntimeSnapshot) {
     this.snapshot = snapshot;
   }
@@ -91,6 +93,8 @@ export class CardBridge {
     );
     if (!entry) return;
     const [frameId, frame] = entry;
+    if (data.type === 'interaction') this.onInteraction();
+    if (data.type === 'ready') this.send(frame, { type: 'snapshot', snapshot: this.getSnapshot() });
     if (data.type === 'resize' && Number.isFinite(data.height))
       frame.onResize(Math.min(1600, Math.max(120, data.height)));
     if (data.type === 'error') frame.onError(String(data.message).slice(0, 3000));

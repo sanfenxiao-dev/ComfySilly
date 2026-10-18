@@ -39,6 +39,25 @@ try {
  await page.reload();await page.getByRole('button',{name:'已启用交互 · 点击停用'}).waitFor();await page.frameLocator('iframe[title="角色卡交互前端"]').getByRole('button',{name:'作者按钮'}).waitFor();
  await page.getByRole('button',{name:'已启用交互 · 点击停用'}).click();await page.reload();await page.getByRole('button',{name:'信任此卡并启用交互前端'}).waitFor();assert.equal(await page.locator('iframe').count(),0);
  await page.getByRole('button',{name:'信任此卡并启用交互前端'}).click();card={...card,first_mes:card.first_mes.replace('作者按钮','更新按钮')};await page.reload();await page.getByRole('button',{name:'信任此卡并启用交互前端'}).waitFor();assert.equal(await page.locator('iframe').count(),0);
- report.checks.push('trust survives reload; revocation persists; changed executable card requires fresh consent');assert.deepEqual(report.errors,[]);
+ report.checks.push('trust survives reload; revocation persists; changed executable card requires fresh consent');
+ card={id:'regex-only-frontend',name:'正则前端测试',first_mes:'FRONTEND_PLACEHOLDER',extensions:{regex_scripts:[{findRegex:'FRONTEND_PLACEHOLDER',replaceString:'```html\n<body><button onclick="this.textContent=\'正则前端已点击\'">正则前端按钮</button></body>\n```',placement:[2]}]},sessions:[]};
+ await page.reload();await page.getByRole('button',{name:'信任此卡并启用交互前端'}).click();
+ const regexFrontend=page.frameLocator('iframe[title="角色卡交互前端"]');
+ await regexFrontend.getByRole('button',{name:'正则前端按钮',exact:true}).click();
+ await regexFrontend.getByRole('button',{name:'正则前端已点击',exact:true}).waitFor();
+ report.checks.push('regex-only frontends expose trust control and render clickable HTML inside chat');
+ card={id:'new-message-snapshot',name:'新消息快照测试',first_mes:'```html\n<body>初始前端</body>\n```',extensions:{regex_scripts:[{findRegex:'真实链路测试回复',replaceString:'```html\n<body><output id="snapshot"></output><script>document.querySelector("#snapshot").textContent=getChatMessages(getCurrentMessageId())[0]?.message ?? "MISSING_CURRENT_MESSAGE";</script></body>\n```',placement:[2]}]},sessions:[]};
+ await page.goto(origin+'tests/chat-harness.html?generation=1');
+ await page.getByRole('button',{name:'信任此卡并启用交互前端'}).click();
+ await page.getByRole('textbox',{name:'对话输入'}).fill('新消息快照验证');await page.getByRole('button',{name:'发送消息',exact:true}).click();
+ await page.frameLocator('iframe[title="角色卡交互前端"]').last().locator('#snapshot').getByText('真实链路测试回复',{exact:true}).waitFor();
+ report.checks.push('newly generated message frontend can synchronously read its own current message');
+ await page.goto(origin+'tests/runtime-snapshot-harness.html');
+ const freshFrame=page.frameLocator('iframe[title="角色卡交互前端"]');
+ await freshFrame.locator('#boot').getByText('FRESH_BOOT_MESSAGE',{exact:true}).waitFor();
+ await freshFrame.locator('#dom').getByText('function:1:0',{exact:true}).waitFor();
+ await freshFrame.getByRole('button',{name:'Vue 0',exact:true}).click();
+ await freshFrame.getByRole('button',{name:'Vue 1',exact:true}).waitFor();
+ report.checks.push('frame initialization uses fresh snapshot without a parent broadcast; displayed message API returns frame-local jQuery');assert.deepEqual(report.errors,[]);
  console.log(JSON.stringify(report,null,2));
 } finally {mkdirSync(join(root,'.test-results'),{recursive:true});writeFileSync(join(root,'.test-results','chat-controls-report.json'),JSON.stringify(report,null,2));await browser.close();await server.close();}

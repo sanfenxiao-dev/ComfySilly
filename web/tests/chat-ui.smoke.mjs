@@ -89,6 +89,14 @@ try {
   const records=await page.evaluate(()=>window.savedCharacters);
   assert.ok(records.some(c=>c.sessions.some(s=>s.runtimeVariables?.chat?.count===7)),'Scoped card variables must persist');
   assert.equal(await interactive.locator('body').evaluate(()=>window.bootId),boot,'Height/variable changes must not reload the iframe');
+  await interactive.locator('body').evaluate(()=>setChatMessages([{message_id:0,message:'前置文本\n'+getChatMessages(0)[0].message}]));
+  assert.equal(await interactive.locator('body').evaluate(()=>window.bootId),boot,'Adding prose before unchanged HTML must preserve the author app and its state');
+  await interactive.getByRole('button',{name:'交互测试按钮'}).hover();
+  const scrollBeforeInteraction=await page.locator('.chat-scroll').evaluate(el=>el.scrollTop);
+  await interactive.locator('body').evaluate(()=>{const p=document.createElement('div');p.id='height-fixture';p.style.height='900px';document.body.append(p);});
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.chat-scroll').evaluate(el=>el.scrollTop),scrollBeforeInteraction,'Resizing an interactive card must not move the chat while the user operates it');
+  await interactive.locator('body').evaluate(()=>document.querySelector('#height-fixture').remove());
   assert.equal(await page.locator('iframe[title="角色卡交互前端"]').getAttribute('sandbox'),'allow-scripts allow-modals');
   assert.equal(await interactive.locator('body').evaluate(()=>{try{return !!window.parent.document;}catch{return false;}}),false,'Untrusted frame must not access parent DOM');
   assert.equal(await interactive.locator('body').evaluate(()=>typeof window.__TAURI_INTERNALS__),'undefined','No native IPC in card frames');
@@ -105,7 +113,7 @@ try {
   assert.ok(requests[0].messages.some(m=>m.content==='请记住：来自用户的上下文'));
   assert.equal(requests[0].providerId,'test-provider');
   assert.equal(requests[0].apiKey,undefined);
-  await page.getByRole('button',{name:'信任此卡并启用交互前端'}).click();
+  await page.getByRole('button',{name:'已启用交互 · 点击停用'}).waitFor();
   await page.frameLocator('iframe[title="角色卡交互前端"]').getByRole('button',{name:'交互测试按钮'}).waitFor();
   assert.equal((await page.locator('iframe[title="角色卡交互前端"]').getAttribute('srcdoc')).includes('TEST_ONLY_KEY_NOT_FOR_CARDS'),false);
   await page.screenshot({path:join(output,'streaming-chat.png'),fullPage:true});

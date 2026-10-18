@@ -76,6 +76,8 @@ export function useCardRuntime(options: Options) {
     () => new CardBridge(snapshot(options)),
     [options.character.id, options.session.id],
   );
+  // New documents must read current render inputs, before passive snapshot broadcasts run.
+  bridge.getSnapshot = () => snapshot(latest.current);
   useEffect(() => {
     bridge.start();
     return () => bridge.destroy();
@@ -202,7 +204,7 @@ export function useCardRuntime(options: Options) {
         const used = new Set(
           (existing ?? []).map((e: Obj, i: number) => Number(e.uid ?? e.id ?? i)),
         );
-        let nextUid = Math.max(-1, ...used) + 1;
+        let nextUid = Math.max(-1, ...Array.from(used).map(Number)) + 1;
         const added = args[1].map((e: Obj, i: number) => {
           const old =
             method === 'createWorldbookEntries'

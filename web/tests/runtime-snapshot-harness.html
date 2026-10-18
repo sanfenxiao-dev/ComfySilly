@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>Frame startup regression</title></head>
+<body><div id="root"></div><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { CardBridge } from '/src/runtime/cardBridge.ts';
+import { InteractiveFrame } from '/src/components/InteractiveFrame.tsx';
+const stale={character:{id:'snapshot-fixture',name:'Fixture'},variables:{},messages:[],regexes:[]};
+const latest={...stale,messages:[{message_id:0,role:'assistant',name:'Fixture',message:'FRESH_BOOT_MESSAGE',data:{},extra:{},is_hidden:false}]};
+const bridge=new CardBridge(stale);
+bridge.getSnapshot=()=>latest;
+bridge.start();
+// Deliberately omit the parent's passive broadcast: srcdoc itself must be current.
+const html='<body><output id="boot"></output><output id="dom"></output><div id="vue"></div><script>document.querySelector("#boot").textContent=getChatMessages(0)[0]?.message ?? "STALE_SNAPSHOT";document.querySelector("#dom").textContent=typeof retrieveDisplayedMessage(0).html+":"+retrieveDisplayedMessage(0).length+":"+retrieveDisplayedMessage(99).length;Vue.createApp({setup(){const n=Vue.ref(0);return()=>Vue.h("button",{onClick:()=>n.value++},"Vue "+n.value)}}).mount("#vue");<\/script></body>';
+createRoot(document.getElementById('root')).render(React.createElement(InteractiveFrame,{bridge,html,messageId:0}));
+</script></body></html>

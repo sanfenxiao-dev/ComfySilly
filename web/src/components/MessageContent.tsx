@@ -88,6 +88,7 @@ export const MessageContent = memo(function MessageContent({
     [content, rules, role, depth],
   );
   const parts = useMemo(() => splitMessageParts(result.text), [result.text]);
+  let htmlIndex = 0;
   return (
     <div className="space-y-3 select-text">
       {result.diagnostics.length > 0 && (
@@ -103,19 +104,22 @@ export const MessageContent = memo(function MessageContent({
           ))}
         </details>
       )}
-      {parts.map((part, i) =>
-        part.kind === 'html' ? (
+      {parts.map((part, i) => {
+        // Script-generated metadata can add/remove surrounding prose. Keep the same
+        // frontend mounted when its HTML is unchanged, regardless of text offsets.
+        const key = part.kind === 'html' ? `html:${htmlIndex++}` : `text:${i}`;
+        return part.kind === 'html' ? (
           bridge && role === 'assistant' ? (
-            <InteractiveFrame key={i} html={part.content} bridge={bridge} messageId={messageId} />
+            <InteractiveFrame key={key} html={part.content} bridge={bridge} messageId={messageId} />
           ) : (
-            <FrontendPreview key={i} html={part.content} />
+            <FrontendPreview key={key} html={part.content} />
           )
         ) : (
-          <Markdown key={i} remarkPlugins={[remarkGfm]}>
+          <Markdown key={key} remarkPlugins={[remarkGfm]}>
             {part.content}
           </Markdown>
-        ),
-      )}
+        );
+      })}
       {!result.text.trim() && (
         <p className="text-xs text-slate-500">消息内容被显示正则隐藏，可展开原文检查。</p>
       )}
