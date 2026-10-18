@@ -60,13 +60,20 @@ if (nativeFetch && (window as any).__COMFY_CARD__?.networkProxy) {
 }
 class CardXMLHttpRequest {
   method = 'GET'; url = ''; async = true; status = 0; readyState = 0; responseText = ''; response = '';
-  onload: (() => void) | null = null; onerror: (() => void) | null = null; onreadystatechange: (() => void) | null = null;
+  onload: (() => void) | null = null; onerror: (() => void) | null = null; onabort: (() => void) | null = null; ontimeout: (() => void) | null = null; onreadystatechange: (() => void) | null = null;
+  timeout = 0;
   private headers: Record<string, string> = {};
+  private responseHeaders: Record<string, string> = {};
+  private listeners = new Map<string, Set<() => void>>();
   open(method: string, url: string, async = true) { this.method = method; this.url = url; this.async = async; this.readyState = 1; this.onreadystatechange?.(); }
   setRequestHeader(name: string, value: string) { this.headers[name] = value; }
-  send(body?: string) { void cardNetworkRequest({ url: this.url, method: this.method, headers: this.headers, body }).then((r) => { this.status = r.status; return r.text(); }).then((text) => { this.responseText = text; this.response = text; this.readyState = 4; this.onreadystatechange?.(); this.onload?.(); }).catch(() => { this.readyState = 4; this.onreadystatechange?.(); this.onerror?.(); }); }
-  abort() {}
-  getAllResponseHeaders() { return ''; }
+  addEventListener(name: string, handler: () => void) { if (!this.listeners.has(name)) this.listeners.set(name, new Set()); this.listeners.get(name)!.add(handler); }
+  private emit(name: string) { this.listeners.get(name)?.forEach((handler) => handler()); }
+  send(body?: string) { void cardNetworkRequest({ url: this.url, method: this.method, headers: this.headers, body }).then(async (r) => { this.status = r.status; r.headers.forEach((v, k) => { this.responseHeaders[k.toLowerCase()] = v; }); return r.text(); }).then((text) => { this.responseText = text; this.response = text; this.readyState = 4; this.onreadystatechange?.(); this.emit('readystatechange'); this.onload?.(); this.emit('load'); }).catch(() => { this.readyState = 4; this.onreadystatechange?.(); this.emit('readystatechange'); this.onerror?.(); this.emit('error'); }); }
+  abort() { this.onabort?.(); this.emit('abort'); }
+  getAllResponseHeaders() { return Object.entries(this.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\r\n'); }
+  getResponseHeader(name: string) { return this.responseHeaders[name.toLowerCase()] ?? null; }
+  overrideMimeType() {}
 }
 if ((window as any).__COMFY_CARD__?.networkProxy) (globalThis as any).XMLHttpRequest = CardXMLHttpRequest;
 let lastReportedError = '';
